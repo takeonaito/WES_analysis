@@ -1,0 +1,109 @@
+---
+title: "for_make_hailtarget"
+author: "Takeo Naito,"
+date: "6/12/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+### read thiopurine phenotype file and make colnames better
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+thio <- read_xlsx("../data/Thiopurine toxicityforDalin_v2.xlsx")
+colnames(thio) <- make.names(colnames(thio))
+
+```
+### delete duplicate IDs
+
+```{r}
+thio1 <- thio %>% 
+  distinct(LAB.ID,.keep_all = TRUE)
+```
+
+### read WES data information (key for IID and genetic ID)
+
+```{r}
+wes <- read_xlsx("../data/niddk_vcf_samples_biostats.xlsx",
+                 col_types = c("text"))
+colnames(wes) <- make.names(colnames(wes))
+```
+### read Copy of Genetics 01_02_2019.xls file for information of All data
+
+```{r}
+pheno <- read_xls("../data/Copy of Genetics 01_02_2019.xls",col_types = "text") 
+colnames(pheno) <- make.names(colnames(pheno))
+pheno <- pheno %>% 
+  drop_na(Genetic.ID)
+dim(pheno)
+```
+
+### left join and make colnames names better 
+
+```{r}
+wes1 <- wes %>% 
+  left_join(thio1,by = c("GeneticID" = "LAB.ID")) %>% 
+  dplyr::rename("#IID" = Seq_ID) %>% 
+  dplyr::select(-AKA,-TelAviv_Controls,-comment) %>% 
+  dplyr::rename(Leukopenia = Leukopenia..Yes.1..No.0) %>% 
+  dplyr::rename(GI.Intolerance = GI.Intolerance..N.V..abd.pain..diarrhea.) %>% 
+  dplyr::rename(Allergy = Allergy..rash..high.fever..hypersensitivity.rxn.) %>% 
+  dplyr::rename(Flu.like = Flu.like.sx..fever..malaise..nausea..HA.)
+
+```
+
+### replace u and U into NA
+```{r}
+wes1[ifelse(wes1 == "U",TRUE,FALSE)] <- -9
+wes1[ifelse(wes1 == "u",TRUE,FALSE)] <- -9
+```
+### replace 0 and 1 into 1 and 2
+
+```{r}
+wes1[ifelse(wes1 == 1,TRUE,FALSE)] <- 2
+wes1[ifelse(wes1 == 0,TRUE,FALSE)] <- 1
+```
+###  left_join with pheno
+
+```{r}
+wes2 <- wes1 %>% 
+  left_join(pheno , by = c("GeneticID" = "Genetic.ID")) %>% 
+  dplyr::select(-Genetic.Comments)
+
+```
+### confirm -9 value's row and column number
+
+```{r}
+which(wes2 == -9, arr.ind=T)
+```
+### replace -9 to NA
+
+```{r}
+wes3 <- wes2 %>% 
+  replace(., . == -9, NA)
+
+which(wes3 == -9, arr.ind=T)
+```
+### rename column name
+
+```{r}
+wes3 <- wes3 %>% 
+  dplyr::rename(IID = "#IID")
+
+colnames(wes3) <- str_replace_all(colnames(wes3), "\\.", "_")
+```
+
+# write targettxt
+```{r}
+write.table(wes3,"../data/targethail1.txt",sep = "\t", row.names = FALSE, quote = FALSE)
+test <- fread("../data/targethail1.txt",fill = TRUE)
+dim(test)
+```
+
+
+
+

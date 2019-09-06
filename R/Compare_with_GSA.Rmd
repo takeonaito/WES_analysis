@@ -1,0 +1,342 @@
+---
+title: "compare_with_gsa"
+author: "Takeo Naito, MD PhD"
+date: "8/10/2019"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+```
+# prepare adimix file and target file(include perianal information)
+
+```{r}
+admix <- fread("/mnt/share6/FOR_Takeo/array_139/admix_with_jewish_nonjewish_prop_added.txt")
+
+target <- fread("/mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt") %>% 
+  select(IID,GeneticID,anal)
+target$GeneticID <- str_replace(target$GeneticID,"-","0")
+```
+# read phenotype file which includes Race information (self reported)
+
+```{r}
+pheno <- read_xls("../data/Copy of Genetics 01_02_2019.xls",col_types = "text")
+colnames(pheno) <- make.names(colnames(pheno))
+pheno <- pheno %>% 
+  distinct(Genetic.ID, .keep_all = TRUE) %>% 
+  select(Genetic.ID, Race)
+pheno$Genetic.ID <- str_replace(pheno$Genetic.ID,"-","0")
+```
+
+```{r}
+target <- target %>% 
+  left_join(pheno,by=c("GeneticID" = "Genetic.ID"))
+
+```
+# merge each file and extract only Caucasian (self reported)
+
+```{r}
+target1 <- target %>% 
+  inner_join(admix,by = c("GeneticID" = "FID")) %>% 
+  filter(anal != -9) %>% 
+  filter(Race == "Caucasian")
+```
+
+# Some outlier exist
+
+```{r}
+ggplot(target1,aes(Caucasian)) + geom_histogram()
+```
+
+
+
+# filter by admix Caucasian
+```{r}
+target2 <- target1 %>% 
+  filter(Caucasian >= 0.75)
+```
+# Check outlier's (Caucasian by self reported but not Caucasian by admixture )
+```{r}
+outlier <- target1 %>% 
+  filter(Caucasian < 0.75)
+
+dim(outlier)
+outlier
+```
+
+# select only Caucasian by admixture
+
+```{r}
+broad <- fread("/mnt/share6/FOR_Takeo/GSA/cedars_broad_GSA_KEY copy.txt")
+feinstein <- fread("/mnt/share6/FOR_Takeo/GSA/cedars_feinstein_GSA_KEY copy.txt")
+```
+```{r}
+broad1 <- broad %>% 
+  mutate(id = paste0(broad$geneticID,broad$geneticID_viaNIDDK)) %>% 
+  select(vcf_ID,id) %>% 
+  distinct(id,.keep_all = TRUE)
+
+broad1$id <- str_replace(broad1$id,"-","0")
+```
+```{r}
+feinstein$geneticID <- str_replace(feinstein$geneticID,"-","0")
+feinstein <- feinstein %>% 
+  distinct(geneticID,.keep_all = TRUE)
+```
+
+```{r}
+target3 <- target2 %>% 
+  left_join(broad1,by = c("GeneticID" = "id")) %>% 
+  left_join(feinstein,by =c("GeneticID" = "geneticID"))
+
+target4 <- target3 %>% 
+  drop_na(vcf_ID.y)
+```
+
+
+```{r}
+target4 %>% 
+  select(IID.x) %>% 
+  write_tsv("/mnt/share6/FOR_Takeo/WES/perianal/caucasian_common.txt",col_names = FALSE)
+
+
+target4 %>% 
+  select(vcf_ID.y) %>% 
+  write_tsv("/mnt/share6/FOR_Takeo/GSA/caucasian_common.txt",col_names = FALSE)
+```
+
+
+
+```{bash}
+plink2 \
+--bfile ../data/cleaned_cedars_bialle \
+--exclude range ../data/highLDregions.txt \
+--geno 0.01 \
+--indep-pairwise 50 5 0.1 \
+--keep ../data/caucasian_admix.txt \
+--maf 0.05 \
+--mind 0.01 \
+--not-chr X Y \
+--out ../filtering/hail/cleaned_cedars_cauc_rev
+
+```
+
+
+```{bash}
+plink2 \
+--bfile ../data/cleaned_cedars_bialle \
+--extract ../filtering/hail/cleaned_cedars_cauc_rev.prune.in \
+--keep ../data/caucasian_admix.txt \
+--out ../filtering/hail/PCAclean_cauc_rev \
+--pca 5 \
+--threads 10
+```
+
+
+
+```{bash}
+plink2 \
+--covar ../filtering/hail/PCAclean_cauc_rev.eigenvec \
+--covar-col-nums 3,4,5,6 \
+--logistic hide-covar \
+--out /mnt/share6/FOR_Takeo/WES/perianal/anal_common \
+--bfile ../data/cleaned_cedars \
+--pheno /mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt \
+--pheno-col-nums 29 \
+--keep /mnt/share6/FOR_Takeo/WES/perianal/caucasian_common.txt \
+--adjust \
+--threads 4
+```
+```{bash}
+plink2 \
+--keep-if anal = 2 \
+--freq \
+--out /mnt/share6/FOR_Takeo/WES/perianal/case_common \
+--bfile ../data/cleaned_cedars \
+--keep /mnt/share6/FOR_Takeo/WES/perianal/caucasian_common.txt \
+--pheno /mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt 
+```
+
+
+```{bash}
+plink2 \
+--keep-if anal = 1 \
+--freq \
+--out /mnt/share6/FOR_Takeo/WES/perianal/cnt_common \
+--bfile ../data/cleaned_cedars \
+--keep /mnt/share6/FOR_Takeo/WES/perianal/caucasian_common.txt \
+--pheno /mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt 
+```
+
+```{r}
+res <- fread("/mnt/share6/FOR_Takeo/WES/perianal/anal_common.anal.glm.logistic") %>% 
+  arrange(P)
+
+casefre <- fread("/mnt/share6/FOR_Takeo/WES/perianal/case_common.afreq")
+colnames(casefre) <- make.names(colnames(casefre))
+
+cntfre <- fread("/mnt/share6/FOR_Takeo/WES/perianal/cnt_common.afreq")
+colnames(cntfre) <- make.names(colnames(cntfre))
+
+```
+
+
+```{r}
+merge1 <- casefre %>% 
+  inner_join(cntfre,by = "ID") %>% 
+  select(-X.CHROM.y,-REF.y,-ALT.y)
+
+
+merge2 <- res %>% 
+  inner_join(merge1,by = "ID") %>% 
+  select(X.CHROM.x, POS, REF,ALT,OBS_CT,OR,P,ALT_FREQS.x,OBS_CT.x,
+         ALT_FREQS.y,OBS_CT.y) %>%  
+  dplyr::rename(CHR =  X.CHROM.x, freq_case = ALT_FREQS.x, freq_cnt = ALT_FREQS.y,
+         total_n = OBS_CT, case_n = OBS_CT.x, cnt_n = OBS_CT.y) %>% 
+  mutate(case_n = case_n/2, cnt_n = cnt_n/2)
+```
+
+
+```{r}
+kable(head(merge2,10)) %>%
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "200px")
+```
+
+```{r}
+head(merge2)
+```
+
+
+
+```{r}
+target4 %>% 
+  mutate(FID = 0) %>% 
+  select(FID,vcf_ID.y,anal) %>% 
+  rename(IID =vcf_ID.y ) %>% 
+  write_tsv("/mnt/share6/FOR_Takeo/GSA/ferrintei/caucasian_common_pheno.txt")
+```
+
+
+```{bash}
+plink2 \
+--keep-if anal = 2 \
+--freq \
+--snp 20:55025762 \
+--out /mnt/share6/FOR_Takeo/GSA/ferrintei/case_common \
+--pfile /mnt/share6/FOR_Takeo/GSA/ferrintei/test_feinstein \
+--keep /mnt/share6/FOR_Takeo/GSA/caucasian_common.txt \
+--pheno /mnt/share6/FOR_Takeo/GSA/ferrintei/caucasian_common_pheno.txt
+```
+
+
+```{bash}
+plink2 \
+--keep-if anal = 1 \
+--freq \
+--snp 20:55025762 \
+--out /mnt/share6/FOR_Takeo/GSA/ferrintei/cnt_common \
+--pfile /mnt/share6/FOR_Takeo/GSA/ferrintei/test_feinstein \
+--keep /mnt/share6/FOR_Takeo/GSA/caucasian_common.txt \
+--pheno /mnt/share6/FOR_Takeo/GSA/ferrintei/caucasian_common_pheno.txt
+```
+
+# confirm frequency consistency in GSA
+
+```{r}
+case_ferri <- fread("/mnt/share6/FOR_Takeo/GSA/ferrintei/case_common.afreq")
+cnt_ferri <- fread("/mnt/share6/FOR_Takeo/GSA/ferrintei/cnt_common.afreq")
+
+case_ferri
+cnt_ferri
+
+  
+```
+
+
+```{bash}
+plink2 \
+--keep-if anal = 1 \
+--export A \
+--snp 20:55025762 \
+--out /mnt/share6/FOR_Takeo/GSA/ferrintei/rs6069753_cnt \
+--pfile /mnt/share6/FOR_Takeo/GSA/ferrintei/test_feinstein \
+--keep /mnt/share6/FOR_Takeo/GSA/caucasian_common.txt \
+--pheno /mnt/share6/FOR_Takeo/GSA/ferrintei/caucasian_common_pheno.txt
+```
+
+```{bash}
+plink2 \
+--keep-if anal = 2 \
+--export A \
+--snp 20:55025762 \
+--out /mnt/share6/FOR_Takeo/GSA/ferrintei/rs6069753_case \
+--pfile /mnt/share6/FOR_Takeo/GSA/ferrintei/test_feinstein \
+--keep /mnt/share6/FOR_Takeo/GSA/caucasian_common.txt \
+--pheno /mnt/share6/FOR_Takeo/GSA/ferrintei/caucasian_common_pheno.txt
+```
+
+
+```{bash}
+plink2 \
+--export A \
+--snp 20:55025762:G:A \
+--out ~/WES/result/rs6069753_cnt \
+--bfile ~/WES/data/cleaned_cedars \
+--keep ~/WES/data/caucasian_admix.txt \
+--pheno /mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt \
+--pheno-col-nums 29 
+```
+
+
+
+
+```{r}
+gsa <- fread("/mnt/share6/FOR_Takeo/GSA/ferrintei/rs6069753_cnt.raw")
+colnames(gsa) <- make.names(colnames(gsa))
+
+gsa1 <- fread("/mnt/share6/FOR_Takeo/GSA/ferrintei/rs6069753_case.raw")
+colnames(gsa1) <- make.names(colnames(gsa1))
+
+gsa_all <- rbind(gsa,gsa1)
+gsa_all$X20.55025762_G <- round(gsa_all$X20.55025762_G)
+
+```
+
+```{r}
+wes <- fread("~/WES/result/rs6069753_cnt.raw")
+colnames(wes) <- make.names(colnames(wes))
+wes <- wes %>% 
+  select(IID,X20.55025762.G.A_G)
+```
+
+
+```{r}
+target <- target4 %>% 
+  select(IID.x, GeneticID,vcf_ID.y)
+
+
+wes1 <- wes %>% 
+  inner_join(target, by = c("IID" = "IID.x"))
+
+```
+
+```{r}
+matome <- wes1 %>% 
+  inner_join(gsa_all,by = c("vcf_ID.y" = "IID")) %>% 
+  rename (WES = X20.55025762.G.A_G, GSA = X20.55025762_G ) %>% 
+  mutate(WES = as.factor(WES)) %>% 
+  mutate (GSA = as.factor(GSA))
+
+```
+
+
+```{r}
+ggplot(matome, aes(x = WES, y = GSA)) + geom_jitter(width = 0.2,height = 0.2)
+```
+

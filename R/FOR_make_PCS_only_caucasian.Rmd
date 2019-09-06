@@ -1,0 +1,73 @@
+---
+title: "Untitled"
+author: "Takeo Naito, MD PhD"
+date: "8/15/2019"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+
+```
+
+
+```{r}
+fam <- fread("~/WES/data/cleaned_cedars.fam")
+admix <- fread("/mnt/share6/FOR_Takeo/array_139/admix_with_jewish_nonjewish_prop_added.txt")
+wes <- read_xlsx("~/WES/data/niddk_vcf_samples_biostats.xlsx",
+                 col_types = c("text"))
+colnames(wes) <- make.names(colnames(wes))
+
+wes$GeneticID <- str_replace(wes$GeneticID,"-","0")
+```
+
+```{r}
+fam1 <- fam %>% 
+  inner_join(wes,by = c("V2" = "Seq_ID"))
+
+fam2 <- fam1 %>% 
+  inner_join(admix,by = c("GeneticID" = "FID"))
+
+fam3 <- fam2 %>% 
+  filter(Caucasian >= 0.75)
+```
+
+
+```{r}
+fam3 %>% 
+  select(V2) %>% 
+  write_tsv("~/WES/data/admix_based_caucasian.txt",col_names = FALSE)
+
+```
+
+
+
+
+```{bash}
+plink2 \
+--bfile ~/WES/data/cleaned_cedars_bialle \
+--exclude range ~/WES/data/highLDregions.txt \
+--geno 0.01 \
+--indep-pairwise 50 5 0.1 \
+--keep ~/WES/data/admix_based_caucasian.txt \
+--maf 0.05 \
+--mind 0.01 \
+--not-chr X Y \
+--out /mnt/share6/FOR_Takeo/WES/PC/admix_based_caucasian
+```
+
+```{bash}
+plink2 \
+--bfile ~/WES/data/cleaned_cedars_bialle \
+--extract /mnt/share6/FOR_Takeo/WES/PC/admix_based_caucasian.prune.in \
+--keep ~/WES/data/admix_based_caucasian.txt \
+--out /mnt/share6/FOR_Takeo/WES/PC/admixed_based_pc \
+--pca 5 \
+--threads 10
+```
+

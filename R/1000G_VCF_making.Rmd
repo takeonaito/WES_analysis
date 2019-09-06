@@ -1,0 +1,129 @@
+---
+title: "FOR_1000G"
+author: "Takeo Naito, MD PhD"
+date: "7/5/2019"
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+
+```
+```{bash}
+plink2 \
+--bfile ../data/cleaned_cedars_bialle \
+--geno 0.01 \
+--indep-pairwise 50 5 0.1 \
+--maf 0.05 \
+--mind 0.01 \
+--exclude ../data/highLDregions.txt \
+--not-chr X Y \
+--out ./hail/cleaned_cedars_bialle
+```
+
+
+```{bash}
+plink2 \
+--bfile ../data/cleaned_cedars_bialle \
+--pca 5 \
+--extract ./hail/cleaned_cedars_bialle.prune.in \
+--threads 10 \
+--out ./hail/PCAclean
+```
+
+
+
+```{r}
+snplist <- read_table2("./WES/filtering/hail/cleaned_cedars_bialle.prune.in",col_names = FALSE)
+
+
+snplist <- snplist %>% 
+  separate(X1,into = c("Chr","BP","A1","A2"), sep = ":") %>% 
+  dplyr::select(Chr,BP) %>% 
+  write_tsv("./WES/data/temp_site_list.txt", col_names = FALSE)
+```
+
+```{bash}
+for i in {1..22}; do
+vcftools --gzvcf /mnt/share6/SHARED_DATASETS/1000_genomes/ALL.chr${i}.phase3_shapeit2_mvncall_integrated_v5a.20130502.genotypes.vcf.gz \
+--positions ../data/temp_site_list.txt \
+--recode \
+--recode-INFO-all \
+--out ../data/1000G/chr${i}.1000g.wes_sites &
+  done
+```
+
+
+```{r}
+namae <- read_tsv('./WES/data/1000G/filename.txt',col_names = FALSE)
+
+namae <- namae[grepl("vcf",namae$X1),] %>% 
+  mutate(X2 = X1) %>% 
+  separate(X2,into = c("chr","no"), sep = "\\.") %>% 
+  select(X1,chr)
+
+namae$chr <- str_replace(namae$chr,"chr","") %>% 
+  as.numeric()
+
+
+namae <- namae %>% 
+  arrange(chr) %>% 
+  select(X1) %>% 
+  write_tsv('./WES/data/1000G/ordered_filenames.txt',col_names = FALSE)
+
+```
+
+```{bash}
+bcftools concat -f ./ordered_filenames.txt -o ./chrall_1000g_wes_sites.vcf
+```
+
+```{r}
+onek_samples <- read_tsv("./WES/data/1000G/igsr_samples.tsv")
+
+colnames(onek_samples) <- make.names(colnames(onek_samples))
+
+onek_samples %>%
+  filter(Superpopulation.code %in% c("EUR", "AFR", "EAS")) %>%
+  mutate(FID = 0) %>%
+  select(FID, Sample.name) %>% 
+  write_tsv("./WES/data/1000G/temp_onek_samples_3_pops.tsv", col_names = FALSE)
+```
+```{python}
+mt = hl.import_vcf('../data/1000G/chrall_1000g_wes_sites.vcf').write('../data/1000G/1000g.mt',
+overwrite = True)
+mt = hl.read_matrix_table('../data/1000G/1000g.mt')
+mt1 = mt.filter_rows(hl.len(mt.alleles) == 2)
+hl.export_vcf(mt1,'../data/1000G/chrall_1000g_wes_sites_bi.vcf')
+```
+
+```{bash}
+plink2 \
+--vcf ./chrall_1000g_wes_sites_bi.vcf \
+--keep temp_onek_samples_3_pops.tsv \
+--make-bed \
+--out temp_chrall_1000g_wes_sites > /dev/null
+
+```
+
+```{bash}
+plink \
+--bfile ../cleaned_cedars_bialle \
+--bmerge temp_chrall_1000g_wes_sites \
+--merge-mode 6 \
+--keep-allele-order \
+--out wes1t6_1000g_wes_sites_merged
+```
+
+```{bash}
+plink2 \
+--bfile ../data/merged \
+--pca 5 \
+--threads 10 \
+--out ./hail/PCAmerged
+
+```
+

@@ -1,0 +1,66 @@
+---
+title: "PC_with_AJ"
+author: "Takeo Naito, MD PhD"
+date: "8/16/2019"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+```
+
+```{r}
+PCs <- fread("/mnt/share6/FOR_Takeo/WES/PC/admixed_based_pc.eigenvec")
+```
+
+
+```{r}
+fam <- fread("~/WES/data/cleaned_cedars.fam")
+admix <- fread("/mnt/share6/FOR_Takeo/array_139/admix_with_jewish_nonjewish_prop_added.txt")
+wes <- read_xlsx("~/WES/data/niddk_vcf_samples_biostats.xlsx",
+                 col_types = c("text"))
+colnames(wes) <- make.names(colnames(wes))
+
+wes$GeneticID <- str_replace(wes$GeneticID,"-","0")
+
+```
+```{r}
+fam1 <- fam %>% 
+  inner_join(wes,by = c("V2" = "Seq_ID"))
+
+fam2 <- fam1 %>% 
+  inner_join(admix,by = c("GeneticID" = "FID"))
+
+fam3 <- fam2 %>% 
+  filter(Caucasian >= 0.75)
+```
+
+```{r}
+fam3 <- fam3 %>% 
+  mutate(AJ = ifelse(Jewish > 0.75,2,1))
+
+
+fam4 <- fam3 %>% 
+  inner_join(PCs, by = c("V2" = "IID"))
+
+```
+
+```{r}
+ggplot(fam4, aes(PC1, PC2, color = as.factor(AJ))) + geom_point()
+```
+```{r}
+ggplot(fam4, aes(PC2, PC3, color = as.factor(AJ))) + geom_point()
+```
+```{r}
+summary(one<-lm(fam4$Jewish~fam4$PC1))
+summary(one<-lm(fam4$Jewish~fam4$PC2))
+summary(one<-lm(fam4$Jewish~fam4$PC3))
+summary(one<-lm(fam4$Jewish~fam4$PC4))
+summary(one<-lm(fam4$Jewish~fam4$PC5))
+```
+

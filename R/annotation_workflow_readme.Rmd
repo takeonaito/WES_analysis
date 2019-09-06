@@ -1,0 +1,462 @@
+---
+title: "An Updated Workflow for Immuno Chip Annotation"
+author: "Translational Genomics Group"
+date: "7/25/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(readxl)
+```
+This file outlines the steps taken to map positions for iChip V1 and iChip V2 markers and subsequently to annotate them. 
+
+### Principles
+- If an issue with a SNP is identified (e.g. multiple mapping), a comment is added to the `MappingComment`, and the mapping information will be set to NA. However, this marker will not be deleted.   
+- Position mapping for SNPs in the PAR have not been extensively checked. Position and XY assignment were based on the original annotation in the Illumina manifest for iChip V2 markers and from the Will Rayner file for iChip V1 only markers. 
+- All insertions and deletions are noted in the logical `insertions_deletions` column. Reference and Alternative allele assignment for these markers have all been set to "0"
+- If a reference or alternate allele assignment was unavailable, the Ref/Alt alleles were set to "0", but the Top or Forward alleles might still be available. Only the Ref/Alt allele assignment were used in the annotation
+
+## Illumina Infinium ImmunoArray V2 (iChip V2)
+The iChip V2 manifest, position, dbSNP138, strand and mapping file was downloaded from <https://support.illumina.com/array/array_kits/infinium-human-immunoarray-24-v2-beadchip-kit/downloads.html> on 7/25/18 and stored in [](./data/Infinium_ImmunoArray_24_v2). The initial mapping was based on the GRCh37 genome and positions.
+
+### Read in iChip V2 Illumina Data
+```{r warning=FALSE, message=FALSE}
+#manifest
+manifest_ichip2_grch37 <- read_csv("data/Infinium_ImmunoArray_24_v2/InfiniumImmunoArray-24v2-0_A.csv", 
+                            skip = 7)
+
+# positions
+genetic_positions <- read_tsv("data/Infinium_ImmunoArray_24_v2/InfiniumImmunoArray-24v2-0_A_Physical-and-Genetic-Coordinates.txt")
+genetic_positions <- genetic_positions %>%
+  rename(MapInfo_GRCh37 = MapInfo, deCODEcM_GRCh37 = `deCODE(cM)`)
+
+#dbsnp
+dbsnp_138 <- read_tsv("data/Infinium_ImmunoArray_24_v2/InfiniumImmunoArray-24v2-0_A_b138_rsids.txt")
+dbsnp_138 <- dbsnp_138 %>%
+  mutate(RsID = ifelse(RsID == ".", NA, RsID)) %>%
+  rename(RsID_dbsnp138 = RsID)
+
+#strand
+strand <- read_tsv("data/Infinium_ImmunoArray_24_v2/InfiniumImmunoArray-24v2-0_A_StrandReport_FDT.txt",
+                   skip = 5)
+
+strand <- strand %>%
+  select(SNP_Name, Forward_Allele1, Forward_Allele2, Top_AlleleA, Top_AlleleB) %>%
+  rename(For_Rev_Allele1_GRCh37 = Forward_Allele1, For_Rev_Allele2_GRCh37 = Forward_Allele2)
+
+#mapping comments
+mapping_comment <- read_tsv("data/Infinium_ImmunoArray_24_v2/InfiniumImmunoArray-24v2-0_A_MappingComment.txt",
+                            col_names = TRUE)
+
+```
+
+### Create iChip V2 Marker Level File from Illumina Source Files
+
+To create the marker level file the above Illumina files for GRCh37 were used. The original iChip V2 manifest has 253,726 markers listed. 
+
+1. Non-genetic (e.g staining etc. ), Non-polymorphic and SNPs without a Name were removed from the manifest file (24 markers). 
+2. Information from the Manifest, Position, dbSNP138, Strand and Mapping files were joined together by the marker Name. 
+3. For markers with multiple mappings, the Chr, MapInfo Position, Genetic Coordinates, RS ID, and alleles were all set to NA. Note, it can be confusing when a marker is named after an RS ID, but actually map to multiple locations in the genome. These markers should likely be removed from analysis. 
+4. All Insertions/Deletions are noted as TRUE or FALSE in the `insertion_deletion` column. 
+5. A column annotating the platform `immuno_arrary_v2` was created. 
+6. For SNPs rs9785772 and rs11857958 a comment was added to note that these markers were previously mapped to an incorrect chromosome by Illumina, but after re-blasting the probe sequence they correctly map to the listed chromosome. 
+
+```{r}
+marker_level <- manifest_ichip2_grch37 %>%
+  filter(!Name %in% c("Extension", "Hybridization", "Non-Polymorphic", "Non-Specific Binding",
+                      "Stringency", "Target Removal", "Staining", "Restoration", NA)) %>%
+  select(Name, IlmnID, Chr, SNP) %>%
+  left_join(., genetic_positions, by = c("Name" = "Name", "Chr" = "Chr")) %>%
+  left_join(., dbsnp_138, by = "Name") %>%
+  left_join(., strand, by = c("Name" = "SNP_Name")) %>%
+  left_join(., mapping_comment, by = "Name") %>%
+  mutate(MappingComment = if_else(is.na(MappingComment), "None", MappingComment)) %>%
+  mutate(Chr = ifelse(str_detect(MappingComment, "Multiple mappings") | 
+                        str_detect(MappingComment, "No probe mappings"), NA, Chr)) %>%
+  mutate(SNP = ifelse(str_detect(MappingComment, "Multiple mappings") | 
+                        str_detect(MappingComment, "No probe mappings"), NA, SNP)) %>%
+  mutate(MapInfo_GRCh37 = ifelse(str_detect(MappingComment, "Multiple mappings") | 
+                                   str_detect(MappingComment, "No probe mappings"), NA, MapInfo_GRCh37)) %>%
+  mutate(deCODEcM_GRCh37 = ifelse(str_detect(MappingComment, "Multiple mappings") | 
+                                    str_detect(MappingComment, "No probe mappings"), NA, deCODEcM_GRCh37)) %>%
+  mutate(RsID_dbsnp138 = ifelse(str_detect(MappingComment, "Multiple mappings") | 
+                                  str_detect(MappingComment, "No probe mappings"), NA, RsID_dbsnp138)) %>%
+  mutate(For_Rev_Allele1_GRCh37 = ifelse(str_detect(MappingComment, "Multiple mappings") | 
+                                           str_detect(MappingComment, "No probe mappings"), NA,
+                                         For_Rev_Allele1_GRCh37)) %>%
+  mutate(For_Rev_Allele2_GRCh37 = ifelse(str_detect(MappingComment, "Multiple mappings") | 
+                                           str_detect(MappingComment, "No probe mappings"), NA,
+                                         For_Rev_Allele2_GRCh37)) %>%
+  mutate(Top_AlleleA = ifelse(str_detect(MappingComment, "Multiple mappings") | 
+                                str_detect(MappingComment, "No probe mappings"), NA, Top_AlleleA)) %>%
+  mutate(Top_AlleleB = ifelse(str_detect(MappingComment, "Multiple mappings") | 
+                                str_detect(MappingComment, "No probe mappings"), NA, Top_AlleleB)) %>%
+  mutate(insertion_deleton = if_else(Top_AlleleA %in% c("I", "D"), TRUE, FALSE)) %>%
+  mutate(platform = "immuno_arrary_v2") %>%
+  mutate(MappingComment = if_else(Name == "rs11857958", "Previously mapped to Chr 5, but probe correctly matched to Chr 15.", MappingComment)) %>%
+  mutate(MappingComment = if_else(Name == "rs9785772", "Previosuly mapped to Chr 2, but probe correctly matched to Chr Y, rs name of probe misleading", MappingComment))
+
+
+```
+
+### Assign Reference and Alternate Alleles
+Reference and alternate allele assignments are based on the files provided by Will Rayner. Strand files for the iChip V2 platform and the GRCh37 genome were downloaded from the Strand Home Page <http://www.well.ox.ac.uk/~wrayner/strand/InfiniumImmunoArray-24v2-0_A-b37-strand.zip> on 7/25/18. These files are relevant to genotype data were alleles have been called using the Illumina TOP BOT strand designation.
+
+The file desingating the reference allele was also donwloaded from the Will Rayner repository on 7/25/18 <http://www.well.ox.ac.uk/~wrayner/strand/RefAlt/InfiniumImmunoArray-24v2-0_A-b37.strand.RefAlt.zip>
+
+```{r warning=FALSE, message=FALSE}
+wr_strand <- read_tsv("data/Infinium_ImmunoArray_24_v2/InfiniumImmunoArray-24v2-0_A-b37.strand", col_names = F)
+wr_strand <- wr_strand %>%
+  rename(wr_name = X1, wr_chr = X2, wr_mapinfo = X3, wr_match = X4, wr_strand = X5, wr_alleles = X6)
+
+ref_strand <- read_tsv("data/Infinium_ImmunoArray_24_v2/InfiniumImmunoArray-24v2-0_A.b37.RefAlt", col_names = F)
+ref_strand <- ref_strand %>%
+  rename(wr_ref_name = X1, wr_ref_allele = X2)
+
+wr_files <- left_join(wr_strand, ref_strand, by = c("wr_name" = "wr_ref_name"))
+```
+
+The strand and reference/alternate files from Will Rayner were joined with the Illumina data by matching on marker Name, MapInfo Position, and Chromosome. For markers that did not match the Will Rayner file on Name, Position, and Chromosome no Reference/Alternate allele calls are avaialble. 
+
+- 3,133 markers did not match on name, position, and chromosome
+- 4,994 additional markers did not have a listed Reference allele in the Will Rayner file
+- 8,127 in markers total are assigned Ref/Alt = 0. The allele information provided by Illumina is still avaialble for many of these SNPs but no Ref/Alt assignment has been made. 
+
+The iChip V2 cleaned file ready for annotation contains 253,702 markers. Many of these SNPs are also iChip V1 markers, described below.
+
+To determine Reference/Alternate allele assignment, markers that matched on name, position and chromosome, and were reported on the - strand in the Will Rayner file were flipped. After flipping the relevant alleles, the reference allele was able to be explicity assigned for all markers. 
+
+Note, the +/- strand designation in the Will Rayner file which we used to flip our alleles, is applicable only to alleles called using TOP/BOT strand designation. The +/- strand designation in this file is not identical to the +/- strand designation commonly accomapnying alleles reported using the Forward/Reverse designation. In the latter case, the +/- designation is used to indicate whether the allele resides on the Forward or Reverse strand. In our case, the (+/-) strand designation is used to identiy alleles called using TOP/BOT strand designation that need to me flipped to align with the reference genome. The reference is generally on the Forward (+) strand.
+
+```{r}
+marker_level <- marker_level %>%
+  left_join(., wr_files, by = c("Name" = "wr_name", "MapInfo_GRCh37" = "wr_mapinfo", "Chr" = "wr_chr")) %>%
+  mutate(Top_AlleleA_Flipped = if_else(!is.na(wr_strand) & wr_strand == "-" & Top_AlleleA == "A", "T",
+                             if_else(!is.na(wr_strand) & wr_strand == "-" & Top_AlleleA == "C", "G",
+                                     if_else(!is.na(wr_strand) & wr_strand == "-" & Top_AlleleA == "G", "C",
+                                             if_else(!is.na(wr_strand) & wr_strand == "-" & Top_AlleleA == "T",
+                                                     "A", Top_AlleleA,
+                                                     if_else(!is.na(wr_strand) & wr_strand == "-" &
+                                                               Top_AlleleA == "I", "D", Top_AlleleA,
+                                                             if_else(!is.na(wr_strand) & wr_strand == "-" &
+                                                                       Top_AlleleA == "D", "I",
+                                                                     Top_AlleleA))))))) %>%
+  mutate(Top_AlleleB_Flipped = if_else(!is.na(wr_strand) & wr_strand == "-" & Top_AlleleB == "A", "T",
+                               if_else(!is.na(wr_strand) & wr_strand == "-" & Top_AlleleB == "C", "G",
+                                       if_else(!is.na(wr_strand) & wr_strand == "-" & Top_AlleleB == "G", "C",
+                                               if_else(!is.na(wr_strand) & wr_strand == "-" & Top_AlleleB == "T",
+                                                       "A", Top_AlleleB,
+                                                       if_else(!is.na(wr_strand) & wr_strand == "-" &
+                                                                 Top_AlleleB == "I", "D", Top_AlleleB,
+                                                               if_else(!is.na(wr_strand) & wr_strand == "-" &
+                                                                         Top_AlleleB == "D", "I",
+                                                                       Top_AlleleB))))))) %>%
+  mutate(Ref_GRCh37 = wr_ref_allele) %>%
+  mutate(Alt_GRCh37 = if_else(Ref_GRCh37 == Top_AlleleA_Flipped, Top_AlleleB_Flipped, Top_AlleleA_Flipped)) %>%
+  mutate(Alt_GRCh37 = if_else(insertion_deleton == TRUE, "0", Alt_GRCh37)) %>%
+  mutate(Ref_GRCh37 = if_else(insertion_deleton == TRUE, "0", Ref_GRCh37)) %>%
+  mutate(Ref_GRCh37 = if_else(is.na(Ref_GRCh37), "0", Ref_GRCh37)) %>%
+  mutate(Alt_GRCh37 = if_else(is.na(Alt_GRCh37), "0", Alt_GRCh37)) %>%
+  select(-c(wr_match, wr_strand, wr_alleles, wr_ref_allele, Top_AlleleA_Flipped, Top_AlleleB_Flipped))
+
+```
+
+## Comparison of Illumina Immuno BeadChip (iChip V1) vs. Illumina Infinium ImmunoArray V2 (iChip V2)
+Comparison files from iChip V1 and V2 were downloaded from Illumina on 7/25/18 <https://support.illumina.com/array/array_kits/infinium-human-immunoarray-24-v2-beadchip-kit/downloads.html>. 
+
+```{r warning=FALSE, message=FALSE}
+# ichip v2 new snps
+additional_snps <- read_tsv("data/ichip_v1_vs_v2_comparison_files/InfiniumImmunoArray-24v2-0_A_vs_Immuno_BeadChip_11419691_B_AdditionalSNPs.txt", 
+                            col_names = "Name")
+# ichip v1 snps not in ichip v2 
+missing_legacy <- read_tsv("data/ichip_v1_vs_v2_comparison_files/InfiniumImmunoArray-24v2-0_A_vs_Immuno_BeadChip_11419691_B_MissingLegacySNPs.txt", 
+                           col_names = "Name")
+
+# ichip v1 markers that have an updated chr position in chip v2
+updated_chr <- read_tsv("data/ichip_v1_vs_v2_comparison_files/InfiniumImmunoArray-24v2-0_A_vs_Immuno_BeadChip_11419691_B_PriorProductModifications_chr.txt")
+
+# ichip v1 markers that an updated position in chip v2 (all markers because build 36 to build 37 genome)
+updated_map <- read_tsv("data/ichip_v1_vs_v2_comparison_files/InfiniumImmunoArray-24v2-0_A_vs_Immuno_BeadChip_11419691_B_PriorProductModifications_mapinfo.txt")
+```
+
+- 86,234 new markers are in iChip V2 that were not in iChip V1
+- 31,977 iChip V1 markers are not in iChip V2
+- For markers that are in both iChip V1 and iChip V2, marker information (e.g. Chr, Position, Alleles) was taken from the iChip V2 manifest. 
+
+```{r}
+# number of additional snps in ichip2 file
+table(additional_snps$Name %in% marker_level$Name)
+
+# number of missing legacy snps in ichip2 file 
+table(missing_legacy$Name %in% marker_level$Name)
+```
+
+### Update Platfrom for iChip V2 SNPs also on iChip V1
+For markers that are on both iChip V1 and iChip V2, the annotated platform was updated. Note, there are  3,068 markers in the iChip V2 manifest, not reported in the additional SNP file and not on iChip V1. All of these are "rs" SNPs and are included.
+
+```{r warning=FALSE, message=FALSE}
+# iChip V1 manifest on build 36
+manifest_ichip1_grch36 <- read_csv("data/HumanImmuno_BeadChip/Immuno_BeadChip_11419691_B.csv", 
+                                   skip = 7)
+
+# modify platform for snps on ichip 1 and 2
+marker_level <- marker_level %>%
+  mutate(platform = if_else(Name %in% manifest_ichip1_grch36$Name, "immuno_chip_v1_immuno_arrary_v2", platform))
+
+# number of ichip v2 markers not in additional snp file or ichip v1 manifest
+marker_level %>%
+  filter(!Name %in% additional_snps$Name) %>%
+  filter(!Name %in% manifest_ichip1_grch36$Name) %>%
+  nrow()
+```
+
+### Create Subset of Markers only on iChip V1
+Markers from the Illumina iChip V1 manifest, not in the curated Illumina iChip V2 manifest, were extracted as iChip V1 only markers. These markers are mapped to the NCBI Build 36 reference human genome. Note, there are 170 markers not reported in the missing legacy SNP file and not on the iChip V2 manifest. These SNPs were included. 
+
+```{r}
+# create subset of ichip v1 only snps
+ichip1_only <- manifest_ichip1_grch36 %>%
+  filter(!Name %in% marker_level$Name)
+
+# number of ichip v1 snps not in ichip v2 and not in reported missing list
+manifest_ichip1_grch36 %>%
+  filter(!Name %in% marker_level$Name) %>%
+  filter(!Name %in% missing_legacy$Name) %>%
+  nrow()
+```
+
+## Prepare iChip V1 Only Markers for Annotation 
+For markers only on iChip V1, we will use the Will Rayner strand files to update the mapping information to GRCh37. These strand files were downloaded on 7/25/18 from <http://www.well.ox.ac.uk/~wrayner/strand/Immuno_BeadChip_11419691_B-b37-strand.zip>. The file used to assign the reference and alternate allele was also downloaded on 7/25/18,  from <http://www.well.ox.ac.uk/~wrayner/strand/RefAlt/Immuno_BeadChip_11419691_B-b37.strand.RefAlt.zip>
+
+A manually entered list of 21 markers that either failed to map to the genome  (18 markers) or existed in our iChip V1 subset but were not in any of the Will Rayner files (3 markers) was created.
+
+```{r warning=FALSE, message=FALSE}
+# wr strand file for iChip v1 to map to GRCh37
+wr_ilmn_strand_b37 <- read_tsv("data/HumanImmuno_BeadChip/Immuno_BeadChip_11419691_B-b37-strand/immuno_beadchip_11419691_b-b37.strand",
+                               col_names = c("wr_name", "wr_chr", "wr_mapinfo", "wr_match", "wr_strand", "wr_alleles"))
+
+# list of markers manually entered from wr miss file for b37 and missing snps from wr files
+ichip1_miss_snps <- c("1kg_1_92261359", "chr20:42993087", "gw_220002", "gw_220003",
+                      "gw_220004", "imm_11_60511827", "rs1083522", "rs17883004", 
+                      "rs2535275", "rs36119871", "rs4117021", "rs435861", "rs6605556",
+                      "rs6908205", "rs694665", "rs777854", "rs843422", "rs9268285",
+                      "rs1131012", "rs1574660", "rs7424356")
+
+# markers mapping to multple locations
+wr_multi_ichip1_b37 <- read_tsv("data/HumanImmuno_BeadChip/Immuno_BeadChip_11419691_B-b37-strand/immuno_beadchip_11419691_b-b37.multiple",
+                                col_names = c("wr_multi_name", "n_match"))
+
+# ref/alt assignment for ichip v1
+wr_ref_alt_ichip1_b37 <- read_tsv("data/HumanImmuno_BeadChip/Immuno_BeadChip_11419691_B-b37.strand.RefAlt", 
+                                  col_names = c("Name", "wr_ref_allele"))
+
+```
+
+### Update Map Position from GRCh36 to GRCh37
+To create the applicable marker level file for the iChip V1 only markers the above files were used. 32,147 markers are listed in the iChip V1 sub-set.
+
+1. Non-genetic (e.g staining etc. ), Non-polymorphic and SNPs without a Name were removed from the manifest file (23 markers). 
+2. Manifest markers were joined to information about about multiple mapping by Name. For all markers that mapped to multiple locations, a comment was added to the `MltipleMapping` column.
+3. For markers that did not map at all, a comment was added to `MultipleMappin` column. 
+4. The Chr, Map Position for SNPs matching to multiple locations or not at all were set to NA. 
+5. All Insertions/Deletions are noted as TRUE or FALSE in the `insertion_deletion` column. 
+6. A column annotating the platform `immuno_chip_v1` was created.
+7. GRCh37 position information was taken from the Will Rayner strand file if the markers matched by name. Markers could not be matched by position because the manifest is on GRCh36 vs GRCh37. Markers could not be matched on Chromosome because of the way XY is handled. I manually confirmed that for all markers that matched by Name, the Chromosome was also identical except for SNPs assigned to the XY region.
+
+```{r}
+ichip1_only <- ichip1_only %>%
+  filter(!Name %in% c("Extension", "Hybridization", "Non-Polymorphic", "Non-Specific Binding",
+                      "Stringency", "Target Removal", "Staining", "Restoration", NA)) %>%
+  left_join(., wr_multi_ichip1_b37, by = c("Name" = "wr_multi_name")) %>%
+  mutate(MappingComment = if_else(is.na(n_match), "None", paste(n_match, "Multiple Matchings", sep = ":"))) %>%
+  mutate(MappingComment = if_else(Name %in% ichip1_miss_snps, "Probe match rate < 90%", MappingComment)) %>%
+  select(Name, IlmnID, Chr, SNP, MappingComment) %>%
+  mutate(Chr = ifelse(MappingComment != "None", NA, Chr)) %>%
+  mutate(SNP = ifelse(MappingComment != "None", NA, SNP)) %>%
+  mutate(insertion_deleton = if_else(SNP %in% c("[I/D]", "[D/I]"), TRUE, FALSE)) %>%
+  mutate(platform = "immuno_chip_v1") %>%  
+  left_join(., wr_ilmn_strand_b37, by = c("Name" = "wr_name")) %>%
+  mutate(MapInfo_GRCh37 = ifelse(MappingComment == "None", wr_mapinfo, NA)) 
+
+```
+
+### Assign Top/Bot Alleles and Ref/Alt Alleles
+1. Alleles with strand designation in the Top/Bot format were taken from matching markers from the Will Rayner Strand file. 
+2. To determine Reference/Alternate allele assignment, markers that matched on name and were reported on the - strand in the Will Rayner file were flipped. After flipping the relevant alleles, the reference allele was able to be explicity assigned for all markers. 
+
+```{r}
+ichip1_only <- ichip1_only %>%
+  mutate(Top_AlleleA = substr(wr_alleles, start = 1, stop = 1)) %>%
+  mutate(Top_AlleleB = substring(wr_alleles, 2)) %>%
+  mutate(Top_AlleleA = if_else(insertion_deleton == TRUE, "I", Top_AlleleA)) %>%
+  mutate(Top_AlleleB = if_else(insertion_deleton == TRUE, "D", Top_AlleleB)) %>%
+  left_join(., wr_ref_alt_ichip1_b37, by = "Name") %>%
+  mutate(Top_AlleleA_Flipped = if_else(!is.na(wr_strand) & wr_strand == "-" & Top_AlleleA == "A", "T",
+                             if_else(!is.na(wr_strand) & wr_strand == "-" & Top_AlleleA == "C", "G",
+                                     if_else(!is.na(wr_strand) & wr_strand == "-" & Top_AlleleA == "G", "C",
+                                             if_else(!is.na(wr_strand) & wr_strand == "-" & Top_AlleleA == "T",
+                                                     "A", Top_AlleleA, Top_AlleleA))))) %>%
+  mutate(Top_AlleleB_Flipped = if_else(!is.na(wr_strand) & wr_strand == "-" & Top_AlleleB == "A", "T",
+                               if_else(!is.na(wr_strand) & wr_strand == "-" & Top_AlleleB == "C", "G",
+                                       if_else(!is.na(wr_strand) & wr_strand == "-" & Top_AlleleB == "G", "C",
+                                               if_else(!is.na(wr_strand) & wr_strand == "-" & Top_AlleleB == "T",
+                                                       "A", Top_AlleleB, Top_AlleleB))))) %>%
+  mutate(Ref_GRCh37 = wr_ref_allele) %>%
+  mutate(Alt_GRCh37 = if_else(Ref_GRCh37 == Top_AlleleA_Flipped, Top_AlleleB_Flipped, Top_AlleleA_Flipped)) %>%
+  mutate(Alt_GRCh37 = if_else(insertion_deleton == TRUE, "0", Alt_GRCh37)) %>%
+  mutate(Ref_GRCh37 = if_else(insertion_deleton == TRUE, "0", Ref_GRCh37)) %>%
+  mutate(Ref_GRCh37 = if_else(is.na(Ref_GRCh37), "0", Ref_GRCh37)) %>%
+  mutate(Alt_GRCh37 = if_else(is.na(Alt_GRCh37), "0", Alt_GRCh37)) %>%
+  select(Name, IlmnID, Chr, SNP, MappingComment, insertion_deleton, platform, MapInfo_GRCh37, Top_AlleleA, 
+         Top_AlleleB, Ref_GRCh37, Alt_GRCh37)
+
+```
+
+### Combine iChip V2 and iChip v1 only SNPs into one Marker Level File 
+```{r}
+marker_level <- bind_rows(marker_level, ichip1_only)
+```
+
+
+## Comparison of New Marker Level File to Current iChip Runs 1-7 Bim
+For this comparison the `IBDichip1to7TOP_unfilteredE.bim` bim file was used. 
+- 11,734 markers in the new Marker File are not in the bim file. These markers were likely removed somewhere along the genotyping process. Many of these markers are "issue" markers that I defaulted to keep in but to not map. The MappingComment for these markers was updated to reflect them not being in the bim file.   
+- 1 marker was in the bim file but not in the Marker File, seq-VH-22Z  
+- The sex and MT chromosomes were provided numerical chromosomal representations  
+- 1,296 markers were identified as having an issue and were mapped in the bim file.  
+- Excluding the NAs, 17 markers, all XY related, had differing chromosomes. If the Chr was NA in one version and not the other, or if the Chromosomes are were not equal the `MappingComment` was updated.   
+- Excluding the NAs, 721 markers have different positions and the comment was updated. If the Map position was NA in one version and not the other, or the positions were not equal the `MappingComment` was updated.
+
+```{r message=FALSE}
+# read bim
+ichip1to7top_unfiltered_e_bim <- read_tsv("data/IBDichip1to7TOP_unfilteredE.bim",
+                                          col_names = c("bim_chr", "bim_marker", 
+                                                        "bim_position", "bim_mapinfo", "bim_A1", "bim_A2"))
+```
+
+```{r}
+# number of snps in marker file not in bim
+table(marker_level$Name %in% ichip1to7top_unfiltered_e_bim$bim_marker)
+# number of snps in bim file not in marker 
+table(ichip1to7top_unfiltered_e_bim$bim_marker %in% marker_level$Name)
+```
+
+```{r}
+# update mapping comments
+marker_level <- left_join(marker_level, ichip1to7top_unfiltered_e_bim, by = c("Name" = "bim_marker"))
+
+marker_level <- marker_level %>%
+  mutate(Chr = if_else(Chr == "X", "23", Chr)) %>%
+  mutate(Chr = if_else(Chr == "Y", "24", Chr)) %>%
+  mutate(Chr = if_else(Chr == "XY", "25", Chr)) %>%
+  mutate(Chr = if_else(Chr == "MT", "26", Chr)) %>%
+  mutate(MappingComment = if_else(is.na(bim_chr) & MappingComment == "None",
+                                  "not in ichip1to7top_unfiltered_e_bim", 
+                                  if_else(is.na(bim_chr) & MappingComment != "None",
+                                          paste(MappingComment, "not in ichip1to7top_unfiltered_e_bim", sep = ": "),
+                                          MappingComment))) %>% 
+  mutate(MappingComment = if_else(is.na(Chr) & MappingComment == "None",
+                                  "updated chr differs from chr in ichip1to7top_unfiltered_e_bim", 
+                                  if_else(is.na(Chr) & MappingComment != "None",
+                                          paste(MappingComment, "updated chr differs from chr in ichip1to7top_unfiltered_e_bim", sep = ": "), MappingComment))) %>%
+  mutate(MappingComment = if_else(Chr != bim_chr & MappingComment == "None",
+                                  "updated chr differs from chr in ichip1to7top_unfiltered_e_bim", 
+                                  if_else(Chr != bim_chr & MappingComment != "None" & !is.na(bim_chr) & !is.na(Chr),
+                                          paste(MappingComment, "updated chr differs from chr in ichip1to7top_unfiltered_e_bim", sep = ": "), MappingComment))) %>%
+  mutate(MappingComment = if_else(is.na(MapInfo_GRCh37) & MappingComment == "None",
+                                  "updated map position differs from position in ichip1to7top_unfiltered_e_bim",
+                                  if_else(is.na(MapInfo_GRCh37) & MappingComment != "None",
+                                          paste(MappingComment, "updated map position differs from position in ichip1to7top_unfiltered_e_bim",
+                                                sep = ": "), MappingComment))) %>%
+  mutate(MappingComment = if_else(MapInfo_GRCh37 != bim_mapinfo & MappingComment == "None",
+                                  "updated map position differs from position in ichip1to7top_unfiltered_e_bim",
+                                  if_else(MapInfo_GRCh37 != bim_mapinfo & MappingComment != "None" & !is.na(MapInfo_GRCh37) & !is.na(bim_mapinfo),
+                                          paste(MappingComment, "updated map position differs from position in ichip1to7top_unfiltered_e_bim", sep = ": "), MappingComment))) %>% 
+  select(-c(bim_chr, bim_position, bim_mapinfo))
+```
+
+## Marker Level Anotation Via ANNOVAR 
+
+The latest version of ANNOVAR (v2018Apr16) was downloaded on 7/16/18 from <http://annovar.openbioinformatics.org/en/latest/user-guide/download/>.
+
+### Data Preperation
+The marker level file created above was used as the initial input. This file was filtered for: 
+
+- Indels were excluded from annotation  
+- Markers without mapping information were exluded  
+- 279,180 markers remained  
+- 6,729 markers did not have a reference/alternative allele assignment (e.g. = "0")  
+- The start and end position was set to equal the mapped position, because indels were removed  
+
+```{r}
+annovar_july_2018_ichip_1_and_2 <- marker_level %>%
+  filter(insertion_deleton == FALSE) %>%
+  filter(!is.na(MapInfo_GRCh37)) %>%
+  mutate(Start = MapInfo_GRCh37) %>%
+  mutate(End = MapInfo_GRCh37) %>%
+  select(Chr, Start, End, Ref_GRCh37, Alt_GRCh37, Name) %>%
+  write_tsv("data/ichip_v2_v1_annovar_input_grch37_no_indels.tsv", col_names = F)
+```
+
+## Download Annotation Databases
+11 databases were used to annotate these markers including:
+
+
+- **refGene**: FASTA sequences for all annotated transcripts in RefSeq Gene  
+- **knownGene**: FASTA sequences for all annotated transcripts in UCSC Known Gene  
+- **ensGene**: FASTA sequences for all annotated transcripts in ENSEMBL Gene  
+- **dbnsfp33a**: whole-exome SIFT, PolyPhen2 HDIV, PolyPhen2 HVAR, LRT, MutationTaster, MutationAssessor, FATHMM, PROVEAN, MetaSVM, MetaLR, VEST, M-CAP, CADD, GERP++, DANN, fathmm-MKL, Eigen, GenoCanyon, fitCons, PhyloP and SiPhy scores from dbNSFP version 3.3a  
+- **intervar_20180118**: InterVar: clinical interpretation of missense variants (indels not supported)  
+- **gnomad_exome**: gnomAD exome collection allele frequencies  
+- **gnomad_genome**: gnomAD genome collection allele frequencies  
+- **mcap**: M-CAP scores for non-synonymous variants  
+- **revel**: REVEL scores for non-synonymous variants  
+- **avsnp150**: dbSNP150 with allelic splitting and left-normalization ids  
+- **cadd13gt20**: CADD version 1.3 score>20  
+
+```{bash eval = FALSE}
+./annovar/annotate_variation.pl -buildver hg19 -downdb -webfrom annovar refGene humandb/
+./annovar/annotate_variation.pl -buildver hg19 -downdb -webfrom annovar knownGene humandb/
+./annovar/annotate_variation.pl -buildver hg19 -downdb -webfrom annovar ensGene humandb/
+./annovar/annotate_variation.pl -buildver hg19 -downdb -webfrom annovar dbnsfp33a humandb/
+./annovar/annotate_variation.pl -buildver hg19 -downdb -webfrom annovar intervar_20180118 humandb/
+./annovar/annotate_variation.pl -buildver hg19 -downdb -webfrom annovar gnomad_exome humandb/
+./annovar/annotate_variation.pl -buildver hg19 -downdb -webfrom annovar gnomad_genome humandb/
+./annovar/annotate_variation.pl -buildver hg19 -downdb -webfrom annovar mcap humandb/
+./annovar/annotate_variation.pl -buildver hg19 -downdb -webfrom annovar revel humandb/
+./annovar/annotate_variation.pl -buildver hg19 -downdb -webfrom annovar avsnp150 humandb/
+./annovar/annotate_variation.pl -buildver hg19 -downdb -webfrom annovar cadd13gt20 humandb/
+```
+
+
+### Run Annotation Protocol
+```{bash eval = FALSE}
+annovar/table_annovar.pl \
+-buildver hg19 \
+-out myanno \
+-remove \
+-protocol refGene,knownGene,ensGene,dbnsfp33a,intervar_20180118,gnomad_exome,gnomad_genome,mcap,revel,avsnp150,cadd13gt20 \
+-operation g,g,g,f,f,f,f,f,f,f,f \
+-nastring NA -polish --thread 36 data/ichip_v2_v1_annovar_input_grch37_no_indels.tsv humandb/
+```
+
+
+### Combine and Write
+```{r message=FALSE, warning=FALSE}
+anno_ichip1_2 <- read_tsv("myanno.hg19_multianno.txt")
+anno_ichip1_2[anno_ichip1_2 == "."] <- NA
+
+anno_ichip1_2 <- annovar_july_2018_ichip_1_and_2  %>%
+  select(Name) %>%
+  bind_cols(., anno_ichip1_2) %>%
+  select(-c(Chr, Start, End, Ref, Alt))
+
+anno_ichip1_2 <- marker_level %>%
+  left_join(., anno_ichip1_2, c("Name" = "Name"))
+
+write_tsv(anno_ichip1_2, path = "ichip_v2_v1_grch37_no_indels_annovar_annotation_25_jul_2018.tsv")
+```
+
+

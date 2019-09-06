@@ -1,0 +1,140 @@
+---
+title: "Untitled"
+author: "Takeo Naito, MD PhD"
+date: "7/9/2019"
+output: html_document
+---
+
+
+```{r}
+getwd()
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+
+```
+```{bash}
+plink2 \
+--covar ../filtering/hail/PCAclean_cauc.eigenvec \
+--covar-col-nums 3,4,5,6 \
+--logistic hide-covar \
+--keep ../data/caucasian.txt \
+--out ../result/panc/pancall_cauc \
+--bfile ../data/cleaned_cedars \
+--pheno ../data/target.txt \
+--pheno-col-nums 4 \
+--threads 4
+
+```
+```{bash}
+plink2 \
+--keep-if Pancreatitis = 2 \
+--freq \
+--out ../result/panc/case_cauc \
+--bfile ../data/cleaned_cedars \
+--keep ../data/caucasian.txt \
+--pheno ../data/target.txt 
+```
+
+```{bash}
+plink2 \
+--keep-if Pancreatitis = 1 \
+--freq \
+--out ../result/panc/cnt_cauc \
+--bfile ../data/cleaned_cedars \
+--keep ../data/caucasian.txt \
+--pheno ../data/target.txt 
+```
+
+## Read result and freq file
+
+```{r}
+res <- fread("../result/panc/pancall_cauc.Pancreatitis.glm.logistic") %>% 
+  arrange(P)
+
+casefre <- fread("../result/panc/case_cauc.afreq")
+colnames(casefre) <- make.names(colnames(casefre))
+
+cntfre <- fread("../result/panc/cnt_cauc.afreq")
+colnames(cntfre) <- make.names(colnames(cntfre))
+
+
+```
+## merge result and freq
+
+```{r}
+merge1 <- casefre %>% 
+  inner_join(cntfre,by = "ID") %>% 
+  select(-X.CHROM.y,-REF.y,-ALT.y)
+
+
+merge2 <- res %>% 
+  inner_join(merge1,by = "ID") %>% 
+  select(X.CHROM.x, POS, REF,ALT,OBS_CT,OR,SE,P,ALT_FREQS.x,OBS_CT.x,
+         ALT_FREQS.y,OBS_CT.y) %>%  
+  dplyr::rename(CHR =  X.CHROM.x, freq_case = ALT_FREQS.x, freq_cnt = ALT_FREQS.y,
+         total_n = OBS_CT, case_n = OBS_CT.x, cnt_n = OBS_CT.y) %>% 
+  mutate(case_n = case_n/2, cnt_n = cnt_n/2)
+
+```
+## show results
+```{r}
+kable(head(merge2)) %>%
+  kable_styling() %>%
+  scroll_box(width = "1000px", height = "200px")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## check HLA  (rs2647087 chr6:32681049,GRCh37)
+```{r}
+hla <- merge2 %>% 
+  filter(CHR == 6 ) %>% 
+  filter(POS > 32681049 -10 & POS < 32681049 + 10) %>% 
+  arrange(P)
+kable(head(hla)) %>%
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "200px")
+```
+
+# check TPMT (chr6:18128542-18155374(GRCh37/hg19))
+```{r}
+
+TPMT <- merge2 %>% 
+  filter(CHR == 6 ) %>% 
+  filter(POS > 18128542 & POS < 18155374) %>% 
+  arrange(P)
+kable(head(TPMT)) %>%
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "200px")
+```
+
+
+
+

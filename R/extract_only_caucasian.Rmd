@@ -1,0 +1,115 @@
+---
+title: "extract_cauccasian"
+author: "Takeo Naito, MD PhD"
+date: "7/23/2019"
+output: html_document
+---
+
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+
+```
+```{r}
+getwd()
+```
+
+
+# read thiopurine phenotype file and make colnames better
+```{r}
+thio <- read_xlsx("../data/Thiopurine toxicityforDalin_v2.xlsx")
+colnames(thio) <- make.names(colnames(thio))
+dim(thio)
+
+thio1 <- thio %>% 
+  distinct(LAB.ID,.keep_all = TRUE)
+dim(thio1)
+
+```
+# read WES data information (key for IID and genetic ID)
+
+```{r}
+wes <- read_xlsx("../data/niddk_vcf_samples_biostats.xlsx",
+                 col_types = c("text"))
+colnames(wes) <- make.names(colnames(wes))
+
+dim(wes)
+```
+# left join and make colnames names better 
+
+```{r}
+wes1 <- wes %>% 
+  left_join(thio1,by = c("GeneticID" = "LAB.ID")) %>% 
+  dplyr::select(-AKA,-TelAviv_Controls,-comment) %>% 
+  dplyr::rename(Leukopenia = Leukopenia..Yes.1..No.0) %>% 
+  dplyr::rename(GI.Intolerance = GI.Intolerance..N.V..abd.pain..diarrhea.) %>% 
+  dplyr::rename(Allergy = Allergy..rash..high.fever..hypersensitivity.rxn.) %>% 
+  dplyr::rename(Flu.like = Flu.like.sx..fever..malaise..nausea..HA.)
+
+dim(wes1)
+```
+# replace u and U into NA
+```{r}
+wes1[ifelse(wes1 == "U",TRUE,FALSE)] <- -9
+wes1[ifelse(wes1 == "u",TRUE,FALSE)] <- -9
+
+```
+# replace 0 and 1 into 1 and 2
+
+```{r}
+wes1[ifelse(wes1 == 1,TRUE,FALSE)] <- 2
+wes1[ifelse(wes1 == 0,TRUE,FALSE)] <- 1
+```
+
+
+# read Copy of Genetics 01_02_2019.xls file for information of All data for ethnicity
+
+```{r}
+pheno <- read_xls("../data/Copy of Genetics 01_02_2019.xls",col_types = "text") 
+colnames(pheno) <- make.names(colnames(pheno))
+pheno <- pheno %>% 
+  distinct(Genetic.ID, .keep_all = TRUE)
+
+dim(pheno)
+
+```
+
+# merge dataset (thiopurine and ethnicity)
+
+```{r}
+merge1 <- wes1 %>% 
+  left_join(pheno, by = c("GeneticID" = "Genetic.ID"))
+
+dim(merge1)
+
+```
+
+
+```{r}
+iranai <- merge1 %>% 
+  filter(Race != "Caucasian")
+
+iranailist <- iranai$Seq_ID
+```
+
+
+```{r}
+cauc <- merge1 %>% 
+  filter(!Seq_ID %in% iranailist  )
+
+only_cauc <- cauc %>% 
+  select(Seq_ID)
+
+dim(only_cauc)
+```
+
+
+```{r}
+write_tsv(only_cauc,"/mnt/share6/FOR_Takeo/WES/data/caucasian_list.txt", col_names = FALSE)
+```
+

@@ -1,0 +1,189 @@
+---
+title: "subjects_who_have_no_phenotype"
+author: "Takeo Naito, MD PhD"
+date: "7/23/2019"
+output: html_document
+---
+
+
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+
+```
+```{r}
+getwd()
+```
+
+
+# read thiopurine phenotype file and make colnames better
+```{r}
+thio <- read_xlsx("../data/Thiopurine toxicityforDalin_v2.xlsx")
+colnames(thio) <- make.names(colnames(thio))
+dim(thio)
+
+thio1 <- thio %>% 
+  distinct(LAB.ID,.keep_all = TRUE)
+dim(thio1)
+
+```
+# read WES data information (key for IID and genetic ID)
+
+```{r}
+wes <- read_xlsx("../data/niddk_vcf_samples_biostats.xlsx",
+                 col_types = c("text"))
+colnames(wes) <- make.names(colnames(wes))
+
+dim(wes)
+```
+# left join and make colnames names better 
+
+```{r}
+wes1 <- wes %>% 
+  left_join(thio1,by = c("GeneticID" = "LAB.ID")) %>% 
+  dplyr::select(-AKA,-TelAviv_Controls,-comment) %>% 
+  dplyr::rename(Leukopenia = Leukopenia..Yes.1..No.0) %>% 
+  dplyr::rename(GI.Intolerance = GI.Intolerance..N.V..abd.pain..diarrhea.) %>% 
+  dplyr::rename(Allergy = Allergy..rash..high.fever..hypersensitivity.rxn.) %>% 
+  dplyr::rename(Flu.like = Flu.like.sx..fever..malaise..nausea..HA.)
+
+dim(wes1)
+```
+# replace u and U into NA
+```{r}
+wes1[ifelse(wes1 == "U",TRUE,FALSE)] <- -9
+wes1[ifelse(wes1 == "u",TRUE,FALSE)] <- -9
+
+```
+# replace 0 and 1 into 1 and 2
+
+```{r}
+wes1[ifelse(wes1 == 1,TRUE,FALSE)] <- 2
+wes1[ifelse(wes1 == 0,TRUE,FALSE)] <- 1
+```
+
+
+# read Copy of Genetics 01_02_2019.xls file for information of All data for ethnicity
+
+```{r}
+pheno <- read_xls("../data/Copy of Genetics 01_02_2019.xls",col_types = "text") 
+colnames(pheno) <- make.names(colnames(pheno))
+pheno <- pheno %>% 
+  distinct(Genetic.ID, .keep_all = TRUE)
+
+dim(pheno)
+
+```
+
+# merge dataset (thiopurine and ethnicity)
+
+```{r}
+merge1 <- wes1 %>% 
+  left_join(pheno, by = c("GeneticID" = "Genetic.ID"))
+
+dim(merge1)
+
+```
+# read cleaned plink fam file
+
+```{r}
+
+fam <- fread("../data/cleaned_cedars.fam")
+
+dim(fam)
+```
+
+# merge dataset again
+```{r}
+merge2 <- merge1 %>% 
+  inner_join(fam,by = c("Seq_ID" = "V2"))
+
+dim(merge2)
+```
+
+
+
+# read cliical phenotype (Disease locatio and disease behavior)
+
+```{r}
+kyosaku <- read_tsv('/mnt/share6/FOR_Takeo/WES/cd_clean.txt')
+
+```
+# merge files and mutate FID column for SKAT 
+
+```{r}
+merge3 <- merge2 %>% 
+  left_join(kyosaku,by = c('GeneticID' = 'genetic_id'))
+
+merge3 <- merge3 %>% 
+  mutate(FID = 0) %>% 
+  rename(IID = Seq_ID) %>% 
+  select(FID,IID,everything())
+```
+
+# Add diagnosis column(DIAG)
+# Basially, priority of diagnosis is according to this order
+  - 1. Current.Diagnosis
+  - 2. Initial.IBD.Diagnosis
+  - 3. DX
+```{r}
+merge3 <- merge3 %>% 
+  mutate(DIAG = if_else(!is.na(Current.Diagnosis) & Current.Diagnosis != 'None',
+                        Current.Diagnosis,
+                        if_else(!is.na(Initial.IBD.Diagnosis), Initial.IBD.Diagnosis,
+                                DX))) 
+```
+# Add column for complicated or not
+
+```{r}
+merge4 <- merge3 %>% 
+  mutate(complicate = if_else(Disease.Classification.of.CD == 1, 1,2))
+```
+# select CD subjects who have no phenotype
+
+```{r}
+df1 <- merge4 %>% 
+  filter(DIAG == "Crohn's Disease") %>% 
+  filter(is.na(Disease.Location)) %>% 
+  select(FID,IID,GeneticID,Disease.Location) %>% 
+  select(GeneticID)
+
+
+
+df2 <- merge4 %>% 
+  filter(DIAG == "Crohn's Disease") %>% 
+  filter(is.na(Disease.Classification.of.CD)) %>% 
+  select(FID,IID,GeneticID,Disease.Classification.of.CD) %>% 
+  select(GeneticID)
+
+df3 <- merge4 %>% 
+  filter(DIAG == "Crohn's Disease") %>% 
+  filter(is.na(DzLocation)) %>% 
+  select(FID,IID,GeneticID,DzLocation) %>% 
+  select(GeneticID)
+
+df4 <- merge4 %>% 
+  filter(DIAG == "Crohn's Disease") %>% 
+  filter(is.na(DzBehavior)) %>% 
+  select(FID,IID,GeneticID,DzBehavior) %>% 
+  select(GeneticID)
+```
+# do full join 
+
+```{r}
+dftotal <- df1 %>% 
+  full_join(df2,by =c("GeneticID")) %>% 
+  full_join(df3,by =c("GeneticID")) %>% 
+  full_join(df4, by =c("GeneticID"))
+
+```
+# write tsv
+```{r}
+write_tsv(dftotal,"/mnt/share6/FOR_Takeo/WES/VEOIBD/unknown_phenotype_subjects.txt")
+```
+

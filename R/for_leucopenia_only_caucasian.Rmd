@@ -1,0 +1,151 @@
+---
+title: "for_caucasian_only"
+author: "Takeo Naito, MD PhD"
+date: "7/8/2019"
+output: html_document
+---
+```{r}
+setwd("/home/takeo/WES/R")
+```
+```{r,message=F, warning=F}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+```
+
+
+```{bash}
+plink2 \
+--bfile ../data/cleaned_cedars_bialle \
+--exclude range ../data/highLDregions.txt \
+--keep ../data/caucasian.txt \
+--geno 0.01 \
+--indep-pairwise 50 5 0.1 \
+--maf 0.05 \
+--mind 0.01 \
+--not-chr X Y \
+--out ../filtering/hail/cleaned_cedars_cauc
+```
+
+
+```{bash}
+plink2 \
+--bfile ../data/cleaned_cedars_bialle \
+--extract ../filtering/hail/cleaned_cedars_cauc.prune.in \
+--out ../filtering/hail/PCAclean_cauc \
+--pca 5 \
+--keep ../data/caucasian.txt \
+--threads 10
+```
+
+
+
+
+
+```{bash}
+plink2 \
+--covar ../filtering/hail/PCAclean_cauc.eigenvec \
+--covar-col-nums 3,4,5,6 \
+--logistic hide-covar \
+--out ../result/leuco/leucoall_cauc \
+--bfile ../data/cleaned_cedars \
+--pheno ../data/target.txt \
+--pheno-col-nums 3 \
+--keep ../data/caucasian.txt \
+--threads 4
+```
+
+```{bash}
+plink2 \
+--keep-if Leukopenia = 2 \
+--freq \
+--out ../result/leuco/case_cauc \
+--bfile ../data/cleaned_cedars \
+--keep ../data/caucasian.txt \
+--pheno ../data/target.txt 
+```
+
+
+```{bash}
+plink2 \
+--keep-if Leukopenia = 1 \
+--freq \
+--out ../result/leuco/cnt_cauc \
+--bfile ../data/cleaned_cedars \
+--keep ../data/caucasian.txt \
+--pheno ../data/target.txt 
+```
+
+```{r}
+res <- fread("../result/leuco/leucoall_cauc.Leukopenia.glm.logistic") %>% 
+  arrange(P)
+
+casefre <- fread("../result/leuco/case_cauc.afreq")
+colnames(casefre) <- make.names(colnames(casefre))
+
+cntfre <- fread("../result/leuco/cnt_cauc.afreq")
+colnames(cntfre) <- make.names(colnames(cntfre))
+
+```
+
+
+```{r}
+merge1 <- casefre %>% 
+  inner_join(cntfre,by = "ID") %>% 
+  select(-X.CHROM.y,-REF.y,-ALT.y)
+
+
+merge2 <- res %>% 
+  inner_join(merge1,by = "ID") %>% 
+  select(X.CHROM.x, POS, REF,ALT,OBS_CT,OR,SE,P,ALT_FREQS.x,OBS_CT.x,
+         ALT_FREQS.y,OBS_CT.y) %>%  
+  dplyr::rename(CHR =  X.CHROM.x, freq_case = ALT_FREQS.x, freq_cnt = ALT_FREQS.y,
+         total_n = OBS_CT, case_n = OBS_CT.x, cnt_n = OBS_CT.y) %>% 
+  mutate(case_n = case_n/2, cnt_n = cnt_n/2)
+```
+
+
+```{r}
+kable(head(merge2)) %>%
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "200px")
+```
+
+
+## check NUDT15 (chr13:48611703-48621358,GRCh37)
+```{r}
+nudt <- merge2 %>% 
+  filter(CHR == 13 ) %>% 
+  filter(POS > 48611703 & POS < 48621358) %>% 
+  arrange(P)
+kable(head(nudt)) %>%
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "200px")
+
+jama <- nudt %>% 
+filter(POS == 48611918)
+
+kable(jama) %>%
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "200px")
+
+```
+
+# check TPMT (chr6:18128542-18155374(GRCh37/hg19))
+
+```{r}
+TPMT <- merge2 %>% 
+  filter(CHR == 6 ) %>% 
+  filter(POS > 18128542 & POS < 18155374) %>% 
+  arrange(P)
+kable(head(TPMT)) %>%
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "200px")
+```
+
+
+
+

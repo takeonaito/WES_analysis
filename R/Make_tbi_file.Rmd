@@ -1,0 +1,13 @@
+---
+title: "Make_tbi_file"
+author: "Takeo Naito, MD PhD"
+date: "7/12/2019"
+output: html_document
+---
+
+```{bash}
+cat VCF1_nonindel.recode.vcf | vcf-sort -c > out.vcf
+bgzip -c out.vcf > out.vcf.gz
+tabix -p vcf out.vcf.gz
+```
+

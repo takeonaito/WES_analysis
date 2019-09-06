@@ -1,0 +1,62 @@
+---
+title: "Separate_SKAT_file_making"
+author: "Takeo Naito, MD PhD"
+date: "7/22/2019"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+```
+
+```{r}
+IDs <- fread("~/WES/data/SKAT/SetIDtest2",header = FALSE)
+head(IDs)
+
+```
+
+# count gene numbers 
+
+```{r}
+namae <- unique(IDs$V1)
+length(namae)
+```
+
+
+
+```{r}
+IDs_split <- split(IDs, IDs$V1)
+head(IDs_split,3)
+```
+# write table from gene1 to gene 22000
+
+```{r}
+for (i in seq(1,22000,200)){
+  start = i
+  end = i + 199
+  test <- IDs_split[c(start:end)]
+  test1 <- bind_rows(test)
+  filenamae <- paste0('~/WES/data/SKAT/SKATlist/genelist',start,':',end,'.txt')
+  write.table(test1,filenamae,col.names = FALSE,row.names = FALSE,quote = FALSE,
+              sep = "\t")
+}
+```
+
+# write table rest of genes(22001 to 22051)
+
+
+```{r}
+saigo <- IDs_split[c(22001:length(namae))]
+saigo1 <- bind_rows(saigo)
+write.table(saigo1,"~/WES/data/SKAT/SKATlist/genelist22001:22051.txt",
+            col.names = FALSE,row.names = FALSE,quote = FALSE,sep = "\t")
+
+```
+
+
+

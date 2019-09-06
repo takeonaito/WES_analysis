@@ -1,0 +1,64 @@
+---
+title: "association_with_parianal_and_Clinvar"
+author: "Takeo Naito, MD PhD"
+date: "8/6/2019"
+output: html_document
+---
+
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+```
+
+
+
+```{r}
+pheno <- read_tsv("/mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt")
+pheno[pheno == -9] <- NA
+Clinvar <- read_xlsx("/mnt/share6/FOR_Takeo/WES/VEOIBD/CLINVAR_based_risk_subjects.xlsx")
+Clinvar <- Clinvar %>% 
+  drop_na(GeneticID)
+
+```
+
+```{r}
+pheno1 <- pheno %>% 
+  drop_na(anal)
+
+pheno2 <- pheno1 %>% 
+  left_join(Clinvar,by = "GeneticID")
+
+```
+
+```{r}
+pheno3 <- pheno2 %>% 
+  mutate(allele_number = ifelse(is.na(number_of_alleles),0,number_of_alleles)) %>% 
+  select(-number_of_alleles)
+
+```
+
+
+```{r}
+table(pheno3$anal)
+```
+
+```{r}
+ggplot(pheno3,aes(x = allele_number)) + geom_histogram() + 
+  scale_x_continuous(breaks = seq(0,5,1), labels = seq(0,5,1))
+```
+
+```{r}
+table(pheno3$anal,pheno3$allele_number)
+```
+
+```{r}
+fisher.test(table(pheno3$anal,pheno3$allele_number))
+
+```
+
+

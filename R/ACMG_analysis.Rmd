@@ -1,0 +1,91 @@
+---
+title: "For_acmg_analysis"
+author: "Takeo Naito, MD PhD"
+date: "7/10/2019"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+
+```
+
+
+
+```{r}
+path = "/home/takeo/exomechip/DATA_FINAL_IBD Exome Plus_Apr2013/UPDATED FILES/data/"
+```
+
+
+# read necessary files (clinvar variant files and ACMG gene namelist)
+# clinvar file is from ftp://ftp.ncbi.nlm.nih.gov/pub/clinvar/tab_delimited/
+
+```{r}
+vari <- read_tsv(paste0(path,"snplist/variant_summary2.txt")) 
+colnames(vari) <- make.names(colnames(vari))
+
+acmg <- read_tsv(paste0(path,"snplist/ACMGgene"),col_names = FALSE)
+
+```
+
+# extract variant information of ACMG genes 
+# extract variant with GGCh37
+
+```{r}
+ACMG <- vari %>% 
+  dplyr::filter(GeneSymbol %in% acmg$X1) %>% 
+  filter(Assembly == "GRCh37")
+
+```
+# select only pathogenic genes
+
+```{r}
+ACMG <- ACMG[grepl("Pathogenic",ACMG$ClinicalSignificance,ignore.case = TRUE),]
+```
+# exclude "conflicting" variants
+
+```{r}
+ACMG <- ACMG[!grepl("Conflicting",ACMG$ClinicalSignificance,ignore.case = TRUE),]
+```
+# make snplist of ACMG pathogenic variants
+
+
+```{r}
+snplist <- ACMG %>% 
+  dplyr::select(GeneSymbol,Type,ClinicalSignificance,RS...dbSNP.,PhenotypeList,
+                Chromosome,Start,Stop,ReferenceAllele,AlternateAllele) %>% 
+  mutate(snp = paste0("rs",RS...dbSNP.)) %>% 
+  arrange(GeneSymbol) %>% 
+  dplyr::select(-RS...dbSNP.) %>% 
+  mutate(hantei = ifelse(ReferenceAllele == "na" & snp == "rs-1",FALSE,TRUE)) %>% 
+  filter(hantei == TRUE) %>% 
+  select(-hantei)
+  
+
+```
+
+# select necessary colmuns and write table
+```{r}
+snplist1 <- snplist %>% 
+  select(Chromosome,Start,Stop,Stop,GeneSymbol) 
+
+write.table(snplist1,"../data/ACMG/ACMGlist.txt",quote = FALSE, sep = "\t",
+            col.names = FALSE,row.names = FALSE)
+```
+
+# use plink2 for extract ACMG actionable variants
+
+```{bash}
+plink2 \
+--bfile ../data/cleaned_cedars \
+--extract range ../data/ACMG/ACMGlist.txt \
+--make-bed \
+--out ../data/ACMG/acmg
+
+```
+

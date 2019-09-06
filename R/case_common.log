@@ -1,0 +1,20 @@
+PLINK v2.00a2LM 64-bit Intel (24 Jul 2019)
+Options in effect:
+  --freq
+  --keep /mnt/share6/FOR_Takeo/GSA/caucasian_common.txt
+  --keep-if anal = 2
+  -- ./case_common
+  --pfile ./test_feinstein
+  --pheno /mnt/share6/FOR_Takeo/GSA/ferrintei/caucasian_common_pheno.txt
+
+Hostname: workstation2
+Working directory: /home/takeo/WES/R
+Start time: Mon Aug 12 11:04:17 2019
+
+Random number seed: 1565633057
+128904 MiB RAM detected; reserving 64452 MiB for main workspace.
+Using up to 48 threads (change this with --threads).
+
+Error: Failed to open ./test_feinstein.psam.
+
+End time: Mon Aug 12 11:04:17 2019

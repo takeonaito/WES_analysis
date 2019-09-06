@@ -1,0 +1,60 @@
+---
+title: "FOR_number_of_alleles"
+author: "Takeo Naito, MD PhD"
+date: "8/6/2019"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+```
+
+
+
+```{r}
+pheno <- read_tsv("/mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt")
+pheno[pheno == -9] <- NA
+CADD <- read_xlsx("/mnt/share6/FOR_Takeo/WES/VEOIBD/CADD_based_risk_subjects_rev.xlsx")[,-1]
+CADD <- CADD %>% 
+  drop_na(GeneticID)
+
+```
+
+```{r}
+pheno1 <- pheno %>% 
+  drop_na(anal)
+
+pheno2 <- pheno1 %>% 
+  inner_join(CADD,by = "GeneticID")
+
+```
+
+```{r}
+table(pheno2$anal)
+```
+
+```{r}
+ggplot(pheno2,aes(x = number_of_alleles)) + geom_histogram() + 
+  scale_x_continuous(breaks = seq(0,10,1), labels = seq(0,10,1))
+```
+
+```{r}
+pheno2 %>% 
+  group_by(anal) %>% 
+  summarise(MEAN = mean(number_of_alleles),
+            SD = sd(number_of_alleles)) 
+
+```
+
+```{r}
+ggplot(pheno2,aes(x = as.factor(anal), y = number_of_alleles)) + geom_boxplot()
+```
+
+
+
+

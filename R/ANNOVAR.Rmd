@@ -1,0 +1,18 @@
+---
+title: "ANNOVAR"
+author: "Takeo Naito, MD PhD"
+date: "8/13/2019"
+output: html_document
+---
+# run this code in "/mnt/share6/Annotation files/ichip_v2_v1_annovar_annotation_25_jul_2018"
+
+```{bash}
+annovar/table_annovar.pl /mnt/share6/FOR_Takeo/annovar/annota.txt humandb/ \
+-buildver hg19 \
+-out /mnt/share6/FOR_Takeo/annovar/wes_all_rev \
+-remove \
+-protocol refGene,knownGene,ensGene,dbnsfp33a,intervar_20180118,gnomad_exome,gnomad_genome,mcap,revel,avsnp150,cadd13gt20 \
+-operation g,g,g,f,f,f,f,f,f,f,f \
+-nastring . -polish --thread 20
+```
+

@@ -1,0 +1,167 @@
+---
+title: "Untitled"
+author: "Takeo Naito, MD PhD"
+date: "8/21/2019"
+output: html_document
+---
+
+
+
+```{bash}
+plink \
+--bfile ~/WES/data/cleaned_cedars_bialle \
+--exclude range ~/WES/data/highLDregions.txt \
+--geno 0.01 \
+--indep-pairwise 50 5 0.1 \
+--maf 0.05 \
+--mind 0.01 \
+--not-chr X Y \
+--out /mnt/share6/FOR_Takeo/WES/PC/for_relatedness
+```
+
+```{bash}
+plink \
+--bfile /mnt/share6/FOR_Takeo/WES/plinkdata/cleaned_cedars_rev \
+--extract /mnt/share6/FOR_Takeo/WES/PC/for_relatedness.prune.in \
+--genome \
+--min 0.125 \
+--out /mnt/share6/FOR_Takeo/WES/PC/relatedness_rev
+```
+
+```{r}
+rel <- fread("/mnt/share6/FOR_Takeo/WES/PC/relatedness.genome")
+```
+
+```{bash}
+plink2 \
+--bfile /mnt/share6/FOR_Takeo/WES/plinkdata/cleaned_cedars_gender \
+--make-king-table \
+--out /mnt/share6/FOR_Takeo/WES/PC/relatedness \
+--threads 20 \
+--king-table-filter 0.0885
+
+```
+
+# read necessary files
+```{r}
+rel <- fread("/mnt/share6/FOR_Takeo/WES/PC/relatedness.genome")
+
+admix <- fread("/mnt/share6/FOR_Takeo/array_139/admix_with_jewish_nonjewish_prop_added.txt") %>% 
+  select(FID,Caucasian)
+
+pheno <- read_xls("/mnt/share6/FOR_Takeo/WES/Copy of Genetics 01_02_2019.xls",
+                  col_types = "text")
+colnames(pheno) <- make.names(colnames(pheno))
+
+nid <- read_xlsx("/mnt/share6/FOR_Takeo/WES/niddk_vcf_samples_biostats.xlsx",
+col_types = "text")
+colnames(nid) <- make.names(colnames(nid))
+
+fam <- fread("/mnt/share6/FOR_Takeo/WES/plinkdata/cleaned_cedars_gender.fam")
+```
+
+# make key file between GeneticID and Seq_ID
+```{r}
+nid1 <- nid %>% 
+  left_join(pheno,by = c("GeneticID" = 'Genetic.ID')) %>% 
+  select(Seq_ID,GeneticID,AKA,TelAviv_Controls,NOT.CEDARS,Race,Relation.to.Proband)
+
+nid2 <- nid1 %>% 
+  inner_join(fam, by = c("Seq_ID" = "V2")) %>% 
+  select(-V1,-V5,-V3,-V4,-V6)
+
+head(nid2)
+```
+
+# select necessary columns for relatedness check
+```{r}
+
+rel1 <- rel %>% 
+  select(IID1,IID2,PI_HAT)
+```
+
+```{r}
+rel2 <- rel1 %>% 
+  inner_join(nid2,by = c("IID1" = "Seq_ID")) %>% 
+  select(IID1,Relation.to.Proband,Race,IID2,GeneticID,PI_HAT)
+```
+
+
+```{r}
+rel3 <- rel2 %>% 
+  inner_join(nid2,by = c("IID2" = "Seq_ID")) %>% 
+  select(IID1,Relation.to.Proband.x,Race.x,GeneticID.x,IID2,Relation.to.Proband.y,
+         Race.y,GeneticID.y,PI_HAT)
+
+rel4 <- rel3 %>% 
+  mutate (GeneticID.x = str_replace(GeneticID.x,"-","0")) %>% 
+  mutate (GeneticID.y = str_replace(GeneticID.y,"-","0"))
+
+rel5 <- rel4 %>% 
+  left_join(admix, by = c("GeneticID.x" = "FID")) %>% 
+  select(IID1,Relation.to.Proband.x,GeneticID.x,Caucasian,IID2,Relation.to.Proband.y,GeneticID.y,
+         PI_HAT)
+
+rel6 <- rel5 %>% 
+  left_join(admix, by = c("GeneticID.y" = "FID")) %>% 
+  select(-PI_HAT,everything())
+
+head(rel6)
+
+```
+
+# only need caucasian data
+```{r}
+rel7 <- rel6 %>% 
+  filter(Caucasian.x > 0.75) 
+
+```
+#  probands have priority
+
+```{r}
+rel8 <- rel7 %>% 
+  mutate (hantei = ifelse((Relation.to.Proband.x == "Proband" & Relation.to.Proband.y != "Proband") ,IID2,
+                          ifelse((Relation.to.Proband.y == "Proband" & Relation.to.Proband.x != "Proband"),IID1,
+                                 ifelse((Relation.to.Proband.x == "Proband" & Relation.to.Proband.y == "Proband"),"both",
+                                        "else"))))
+
+```
+
+```{r}
+anal <- read_tsv("/mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt") %>% 
+  filter(anal != -9) %>% 
+  select(IID,anal)
+
+
+rel9 <- rel8 %>% 
+  left_join(anal,by = c("IID1" = "IID"))
+
+rel10 <- rel9 %>% 
+  left_join(anal,by = c("IID2" = "IID"))
+
+```
+
+# subjects who have phenotype data have priority, if both are missing or both are available,
+# probands have priority
+
+```{r}
+rel11 <- rel10 %>% 
+  mutate(exclude = ifelse((!is.na(anal.x) & !is.na(anal.y)), hantei,
+                          ifelse((!is.na(anal.x) & is.na(anal.y)),IID2,
+                                 ifelse((is.na(anal.x) & !is.na(anal.y)),IID1,
+                                        ifelse((is.na(anal.x) & is.na(anal.y)),IID1,
+                                               "hoka"))))) %>% 
+  select(IID1,IID2,Relation.to.Proband.x,Relation.to.Proband.y,hantei,anal.x,anal.y,
+         exclude,PI_HAT)
+head(rel11)
+```
+# export table
+
+```{r}
+rel11 %>% 
+  mutate(last_hantei = ifelse(exclude == "both",IID1,exclude)) %>% 
+  select(last_hantei) %>% 
+  distinct(last_hantei) %>% 
+  write_tsv("/mnt/share6/FOR_Takeo/WES/plinkdata/relate.txt",col_names = FALSE)
+```
+

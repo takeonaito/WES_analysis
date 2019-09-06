@@ -1,0 +1,39 @@
+---
+title: "Untitled"
+author: "Takeo Naito, MD PhD"
+date: "2019/8/20"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+```
+
+```{r}
+pheno <- fread("/mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt")
+fam <- fread("~/WES/data/cleaned_cedars.fam")
+```
+
+```{r}
+fam %>% inner_join(pheno,by = c("V2" = "IID")) %>% 
+  select(V1,V2,V3,V4,Gender,V6) %>% 
+  mutate(Gender = ifelse(Gender == -9,0,Gender)) %>% 
+  write_tsv("~/WES/data/gender.txt",col_names = FALSE)
+```
+
+
+```{bash}
+plink2 \
+--make-bed \
+--out /mnt/share6/FOR_Takeo/WES/cleaned_cedars_gender \
+--bfile /mnt/share6/FOR_Takeo/WES/cleaned_cedars \
+--update-sex ~/WES/data/gender.txt 'col-num=5' \
+--threads 4
+```
+
+

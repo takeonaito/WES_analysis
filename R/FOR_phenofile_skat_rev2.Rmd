@@ -1,0 +1,264 @@
+---
+title: "Untitled"
+author: "Takeo Naito, MD PhD"
+date: "8/22/2019"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+
+```
+```{r}
+getwd()
+```
+
+
+# read thiopurine phenotype file and make colnames better
+```{r}
+thio <- read_xlsx("~/WES/data/Thiopurine toxicityforDalin_v2.xlsx")
+colnames(thio) <- make.names(colnames(thio))
+dim(thio)
+
+thio1 <- thio %>% 
+  distinct(LAB.ID,.keep_all = TRUE)
+dim(thio1)
+
+```
+# read WES data information (key for IID and genetic ID)
+
+```{r}
+wes <- read_xlsx("~/WES/data/niddk_vcf_samples_biostats.xlsx",
+                 col_types = c("text"))
+colnames(wes) <- make.names(colnames(wes))
+
+dim(wes)
+```
+# left join and make colnames names better 
+
+```{r}
+wes1 <- wes %>% 
+  left_join(thio1,by = c("GeneticID" = "LAB.ID")) %>% 
+  dplyr::select(-AKA,-comment) %>% 
+  dplyr::rename(Leukopenia = Leukopenia..Yes.1..No.0) %>% 
+  dplyr::rename(GI.Intolerance = GI.Intolerance..N.V..abd.pain..diarrhea.) %>% 
+  dplyr::rename(Allergy = Allergy..rash..high.fever..hypersensitivity.rxn.) %>% 
+  dplyr::rename(Flu.like = Flu.like.sx..fever..malaise..nausea..HA.)
+
+dim(wes1)
+```
+# replace u and U into NA
+```{r}
+wes1[ifelse(wes1 == "U",TRUE,FALSE)] <- -9
+wes1[ifelse(wes1 == "u",TRUE,FALSE)] <- -9
+
+```
+# replace 0 and 1 into 1 and 2
+
+```{r}
+wes1[ifelse(wes1 == 1,TRUE,FALSE)] <- 2
+wes1[ifelse(wes1 == 0,TRUE,FALSE)] <- 1
+```
+
+# replace TelAviv_Controls column to 1
+```{r}
+wes1$TelAviv_Controls <- str_replace(wes1$TelAviv_Controls,"Tel-Aviv","1")
+```
+
+
+# read Copy of Genetics 01_02_2019.xls file for information of All data for ethnicity
+
+```{r}
+pheno <- read_xls("~/WES/data/Copy of Genetics 01_02_2019.xls",col_types = "text") 
+colnames(pheno) <- make.names(colnames(pheno))
+pheno <- pheno %>% 
+  distinct(Genetic.ID, .keep_all = TRUE) %>% 
+  drop_na(Genetic.ID)
+
+dim(pheno)
+
+```
+
+# merge dataset (thiopurine and ethnicity)
+
+```{r}
+merge1 <- wes1 %>% 
+  left_join(pheno, by = c("GeneticID" = "Genetic.ID"))
+
+dim(merge1)
+
+```
+# read cleaned plink fam file
+
+```{r}
+
+fam <- fread("/mnt/share6/FOR_Takeo/WES/plinkdata/cleaned_cedars_gender.fam")
+
+dim(fam)
+```
+
+# merge dataset again
+```{r}
+merge2 <- merge1 %>% 
+  inner_join(fam,by = c("Seq_ID" = "V2"))
+
+dim(merge2)
+```
+
+
+
+# read cliical phenotype (Disease locatio and disease behavior)
+# I made this file by this code
+shishir <- read_tsv("/mnt/share6/FOR_Takeo/phenotypdata/unknown_phenotype_subjects_updated.txt")
+kyosaku <- read_tsv('/mnt/share6/FOR_Takeo/WES/cd_clean.txt')
+kyosaku_rev <- kyosaku %>% 
+  left_join(shishir,by = c("genetic_id")) %>% 
+  mutate(location = ifelse(is.na(DzLocation),DzLocation_trics,DzLocation)) %>% 
+  mutate(behavior = ifelse(is.na(DzBehavior),DzBehavior_trics,DzBehavior)) %>% 
+  select(genetic_id,location,behavior) %>% 
+  write_tsv("/mnt/share6/FOR_Takeo/phenotypdata/location_behavior.txt")
+
+
+```{r}
+kyosaku <- read_tsv("/mnt/share6/FOR_Takeo/phenotypdata/location_behavior.txt")
+
+```
+# merge files and mutate FID column for SKAT 
+
+```{r}
+merge3 <- merge2 %>% 
+  left_join(kyosaku,by = c('GeneticID' = 'genetic_id'))
+
+merge3 <- merge3 %>% 
+  mutate(FID = 0) %>% 
+  rename(IID = Seq_ID) %>% 
+  select(FID,IID,everything())
+```
+
+# Add diagnosis column(DIAG)
+# Basially, priority of diagnosis is according to this order
+  - 1. Current.Diagnosis
+  - 2. Initial.IBD.Diagnosis
+  - 3. DX
+```{r}
+merge3 <- merge3 %>% 
+  mutate(DIAG = ifelse((!is.na(Current.Diagnosis) & Current.Diagnosis != 'None'),Current.Diagnosis,
+                        ifelse(!is.na(Initial.IBD.Diagnosis), Initial.IBD.Diagnosis,
+                                DX)))
+
+merge3 <- merge3 %>% 
+  mutate(DIAG = ifelse(is.na(TelAviv_Controls),DIAG,"Non-IBD")) %>% 
+  select(-TelAviv_Controls)
+
+
+```
+# Add column for complicated or not
+
+```{r}
+merge4 <- merge3 %>% 
+  mutate(complicate = if_else(!is.na(behavior) & behavior == 1, 1,
+                              ifelse(!is.na(behavior),2,behavior)))
+```
+# select necessary columns
+
+```{r}
+cols <- colnames(merge4)
+
+hoshi <- cols[c(1:15,26,47,48,49,50,36,37,27)]
+hoshi
+
+merge5 <- merge4 %>% 
+  select(hoshi)
+```
+
+# make age columns as numeric
+```{r}
+merge5 <- merge5 %>% 
+  mutate(Age.at.Onset = as.numeric(Age.at.Onset)) %>% 
+  mutate(Exact.Age.at.Onset = as.numeric(Exact.Age.at.Onset))
+
+```
+# make geneder columns M =1 F =2
+
+```{r}
+merge5$Gender[merge5$Gender == "M"] <- 1
+merge5$Gender[merge5$Gender == "F"] <- 2
+```
+
+
+# add columns about Disease location and Diagnosis for SKAT
+```{r}
+
+merge5 <- merge5 %>% 
+  mutate(L1 = ifelse(location == 1,2,
+                     ifelse(!is.na(location),1,location))) %>% 
+  mutate(L2 = ifelse(location == 2,2,
+                     ifelse(!is.na(location),1,location))) %>% 
+  mutate(L3 = ifelse(location == 3,2,
+                     ifelse(!is.na(location),1,location))) %>% 
+  mutate(CDorHC = ifelse(DIAG == "Crohn's Disease",2,
+                          ifelse(DIAG == "Non-IBD" |DIAG == "Normal" ,1,NA))) %>% 
+  mutate(UCorHC = ifelse(DIAG == "Ulcerative Colitis",2,
+                          ifelse(DIAG == "Non-IBD" |DIAG == "Normal",1,NA))) %>% 
+  mutate(CDorUC = ifelse(DIAG == "Crohn's Disease",2,
+                          ifelse(DIAG == "Ulcerative Colitis",1,NA))) %>% 
+  mutate(Caucasian = ifelse(Race == "Caucasian",2,
+                            ifelse(!is.na(Race),1,Race))) %>% 
+  select(-Race,-DIAG)
+```
+
+# add perianal column
+```{r}
+
+anal <- read_xlsx("/mnt/share6/FOR_Takeo/WES/pCD_updated080916-FINALCLEAN.xlsx")
+colnames(anal) = make.names(colnames(anal))
+
+merge6<- merge5 %>% 
+  left_join(anal,by = c("GeneticID" = "LABID")) %>% 
+  mutate(anal = ifelse(Merge.Perianal.final == "Yes",2,
+                       ifelse(Merge.Perianal.final == "No",1,Merge.Perianal.final))) %>% 
+  select(-Merge.Perianal.final)
+
+
+```
+
+
+# make NA to -9 for SKAT
+
+```{r}
+merge6[ifelse(is.na(merge6),TRUE,FALSE)] <- -9
+```
+
+
+# delete umbigous sample
+```{r}
+merge6[3313,]
+merge6 <- merge6 %>% 
+  slice(-3313)
+```
+
+
+
+```{r}
+merge6_bi <- merge6 %>% 
+  select(-GeneticID,-Age.at.Onset,-Exact.Age.at.Onset,-aka.LABID)
+
+merge6_con <- merge6 %>% 
+  select(FID,IID,Age.at.Onset,Exact.Age.at.Onset)
+  
+```
+
+
+# write table 
+
+```{r}
+write_tsv(merge6, "/mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt")
+write_tsv(merge6_bi, "/mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_binary_rev2.txt")
+write_tsv(merge6_con, "/mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_coutinuous_rev2.txt")
+```
+

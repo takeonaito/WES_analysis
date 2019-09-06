@@ -1,0 +1,86 @@
+---
+title: "Untitled"
+author: "Takeo Naito, MD PhD"
+date: "8/15/2019"
+output: html_document
+---
+
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+```
+
+```{bash}
+plink2 \
+--covar /mnt/share6/FOR_Takeo/WES/PC/admixed_based_pc.eigenvec \
+--covar-col-nums 3,4,5,6 \
+--logistic hide-covar \
+--out /mnt/share6/FOR_Takeo/WES/thiopurine/panc \
+--bfile ~/WES/data/cleaned_cedars \
+--pheno /mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt \
+--pheno-col-nums 6 \
+--hwe 0.001 \
+--adjust \
+--threads 4
+```
+
+```{bash}
+plink2 \
+--keep-if Pancreatitis = 2 \
+--keep ~/WES/data/admix_based_caucasian.txt \
+--freq \
+--out /mnt/share6/FOR_Takeo/WES/thiopurine/case_panc \
+--bfile ~/WES/data/cleaned_cedars \
+--pheno /mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt 
+```
+
+```{bash}
+plink2 \
+--keep-if Pancreatitis = 1 \
+--keep ~/WES/data/admix_based_caucasian.txt \
+--freq \
+--out /mnt/share6/FOR_Takeo/WES/thiopurine/cnt_panc \
+--bfile ~/WES/data/cleaned_cedars \
+--pheno /mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt 
+```
+
+
+```{r}
+res <- fread("/mnt/share6/FOR_Takeo/WES/thiopurine/panc.Pancreatitis.glm.logistic") %>% 
+  arrange(P)
+
+casefre <- fread("/mnt/share6/FOR_Takeo/WES/thiopurine/case_panc.afreq")
+colnames(casefre) <- make.names(colnames(casefre))
+
+cntfre <- fread("/mnt/share6/FOR_Takeo/WES/thiopurine/cnt_panc.afreq")
+colnames(cntfre) <- make.names(colnames(cntfre))
+
+```
+
+```{r}
+merge1 <- casefre %>% 
+  inner_join(cntfre,by = "ID") %>% 
+  select(-X.CHROM.y,-REF.y,-ALT.y)
+
+
+merge2 <- res %>% 
+  inner_join(merge1,by = "ID") %>% 
+  select(X.CHROM.x, POS, REF,ALT,OBS_CT,OR,P,ALT_FREQS.x,OBS_CT.x,
+         ALT_FREQS.y,OBS_CT.y) %>%  
+  dplyr::rename(CHR =  X.CHROM.x, freq_case = ALT_FREQS.x, freq_cnt = ALT_FREQS.y,
+         total_n = OBS_CT, case_n = OBS_CT.x, cnt_n = OBS_CT.y) %>% 
+  mutate(case_n = case_n/2, cnt_n = cnt_n/2)
+```
+
+
+```{r}
+kable(head(merge2,10)) %>%
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "200px")
+```
+

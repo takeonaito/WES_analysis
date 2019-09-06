@@ -1,0 +1,133 @@
+---
+title: "FOR_MAKE_Race_disease_cedars"
+author: "Takeo Naito, MD PhD"
+date: "7/26/2019"
+output: html_document
+---
+
+
+
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+
+```
+```{r}
+getwd()
+```
+
+
+# read WES data information (key for IID and genetic ID)
+
+```{r}
+wes <- read_xlsx("../data/niddk_vcf_samples_biostats.xlsx",
+                 col_types = c("text"))
+colnames(wes) <- make.names(colnames(wes))
+
+dim(wes)
+```
+# left join and make colnames names better 
+
+```{r}
+wes1 <- wes %>% 
+  dplyr::select(-AKA) 
+dim(wes1)
+```
+
+
+
+# read Copy of Genetics 01_02_2019.xls file for information of All data for ethnicity
+
+```{r}
+pheno <- read_xls("../data/Copy of Genetics 01_02_2019.xls",col_types = "text") 
+colnames(pheno) <- make.names(colnames(pheno))
+pheno <- pheno %>% 
+  distinct(Genetic.ID, .keep_all = TRUE)
+
+dim(pheno)
+
+```
+
+# merge dataset (thiopurine and ethnicity)
+
+```{r}
+merge1 <- wes1 %>% 
+  left_join(pheno, by = c("GeneticID" = "Genetic.ID"))
+
+dim(merge1)
+
+```
+# read cleaned plink fam file
+
+```{r}
+
+fam <- fread("../data/cleaned_cedars.fam")
+
+dim(fam)
+```
+
+# merge dataset again
+```{r}
+merge2 <- merge1 %>% 
+  inner_join(fam,by = c("Seq_ID" = "V2"))
+
+dim(merge2)
+```
+
+
+
+
+
+
+# Add diagnosis column(DIAG)
+# Basially, priority of diagnosis is according to this order
+  - 1. Current.Diagnosis
+  - 2. Initial.IBD.Diagnosis
+  - 3. DX
+```{r}
+merge3 <- merge2 %>% 
+  mutate(DIAG = if_else(!is.na(Current.Diagnosis) & Current.Diagnosis != 'None',
+                        Current.Diagnosis,
+                        if_else(!is.na(Initial.IBD.Diagnosis), Initial.IBD.Diagnosis,
+                                DX))) 
+```
+
+
+```{r}
+merge4 <- merge3 %>% 
+  select(Seq_ID,DIAG,Race,Relation.to.Proband,NOT.CEDARS,TelAviv_Controls,comment)
+
+table(merge4$DIAG,useNA = "ifany")
+```
+
+```{r}
+onlyibd <- merge4 %>% 
+  filter(DIAG %in% c("Crohn's Colitis","Crohn's Disease","Ulcerative Colitis","Colitis Unclear Type/IBDU"))
+# numbe of subjects
+dim(onlyibd)
+
+# number of diagnosis
+table(onlyibd$DIAG)
+
+# number of race
+table(onlyibd$Race)
+
+# number of relatedness
+table(onlyibd$Relation.to.Proband)
+```
+
+
+
+
+
+
+# write tsv
+```{r}
+write_tsv(onlyibd,"/mnt/share6/FOR_Takeo/WES/acmg/onlyibd_subjects.txt")
+```
+

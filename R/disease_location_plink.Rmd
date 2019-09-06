@@ -1,0 +1,195 @@
+---
+title: "Untitled"
+author: "Takeo Naito, MD PhD"
+date: "8/15/2019"
+output: html_document
+---
+
+---
+title: "perianal_ewas_rev"
+author: "Takeo Naito, MD PhD"
+date: "8/8/2019"
+output: html_document
+---
+
+
+
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+```
+# prepare adimix file and target file(include perianal information)
+
+```{r}
+admix <- fread("/mnt/share6/FOR_Takeo/array_139/admix_with_jewish_nonjewish_prop_added.txt")
+
+target <- fread("/mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt") %>% 
+  select(IID,GeneticID,L2)
+target$GeneticID <- str_replace(target$GeneticID,"-","0")
+```
+# read phenotype file which includes Race information (self reported)
+
+```{r}
+pheno <- read_xls("~/WES/data/Copy of Genetics 01_02_2019.xls",col_types = "text")
+colnames(pheno) <- make.names(colnames(pheno))
+pheno <- pheno %>% 
+  distinct(Genetic.ID, .keep_all = TRUE) %>% 
+  select(Genetic.ID, Race)
+pheno$Genetic.ID <- str_replace(pheno$Genetic.ID,"-","0")
+```
+
+```{r}
+target <- target %>% 
+  left_join(pheno,by=c("GeneticID" = "Genetic.ID"))
+
+```
+# merge each file and extract only Caucasian (self reported)
+
+```{r}
+target1 <- target %>% 
+  inner_join(admix,by = c("GeneticID" = "FID")) %>% 
+  filter(L2 != -9) %>% 
+  filter(Race == "Caucasian")
+```
+
+# Some outlier exist
+
+```{r}
+ggplot(target1,aes(Caucasian)) + geom_histogram()
+```
+
+
+
+# filter by admix Caucasian
+```{r}
+target2 <- target1 %>% 
+  filter(Caucasian >= 0.75)
+```
+# Check outlier's (Caucasian by self reported but not Caucasian by admixture )
+```{r}
+outlier <- target1 %>% 
+  filter(Caucasian < 0.75)
+
+dim(outlier)
+outlier
+```
+
+# select only Caucasian by admixture
+
+```{r}
+target2 %>% 
+  select(IID.x) %>% 
+  write_tsv("~/WES/data/caucasian_admix_L2.txt",col_names = FALSE)
+```
+
+
+```{bash}
+plink2 \
+--covar /mnt/share6/FOR_Takeo/WES/PC/admixed_based_pc.eigenvec \
+--covar-col-nums 3,4,5,6 \
+--logistic hide-covar \
+--out /mnt/share6/FOR_Takeo/WES/disease_location/L3 \
+--bfile ~/WES/data/cleaned_cedars \
+--pheno /mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt \
+--pheno-col-nums 23 \
+--hwe 0.001 \
+--adjust \
+--threads 4
+```
+```{bash}
+plink2 \
+--keep-if L3 = 2 \
+--keep ~/WES/data/admix_based_caucasian.txt \
+--freq \
+--out /mnt/share6/FOR_Takeo/WES/disease_location/case_L3 \
+--bfile ~/WES/data/cleaned_cedars \
+--pheno /mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt 
+```
+
+
+```{bash}
+plink2 \
+--keep-if L3 = 1 \
+--keep ~/WES/data/admix_based_caucasian.txt \
+--freq \
+--out /mnt/share6/FOR_Takeo/WES/disease_location/cnt_L3 \
+--bfile ~/WES/data/cleaned_cedars \
+--pheno /mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt 
+```
+
+```{r}
+res <- fread("/mnt/share6/FOR_Takeo/WES/disease_location/L3.L3.glm.logistic") %>% 
+  arrange(P)
+
+casefre <- fread("/mnt/share6/FOR_Takeo/WES/disease_location/case_L3.afreq")
+colnames(casefre) <- make.names(colnames(casefre))
+
+cntfre <- fread("/mnt/share6/FOR_Takeo/WES/disease_location/cnt_L3.afreq")
+colnames(cntfre) <- make.names(colnames(cntfre))
+
+```
+
+
+```{r}
+merge1 <- casefre %>% 
+  inner_join(cntfre,by = "ID") %>% 
+  select(-X.CHROM.y,-REF.y,-ALT.y)
+
+
+merge2 <- res %>% 
+  inner_join(merge1,by = "ID") %>% 
+  select(X.CHROM.x, POS, REF,ALT,OBS_CT,OR,P,ALT_FREQS.x,OBS_CT.x,
+         ALT_FREQS.y,OBS_CT.y) %>%  
+  dplyr::rename(CHR =  X.CHROM.x, freq_case = ALT_FREQS.x, freq_cnt = ALT_FREQS.y,
+         total_n = OBS_CT, case_n = OBS_CT.x, cnt_n = OBS_CT.y) %>% 
+  mutate(case_n = case_n/2, cnt_n = cnt_n/2)
+```
+
+
+```{r}
+kable(head(merge2,10)) %>%
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "200px")
+```
+
+```{r}
+head(merge2)
+```
+
+
+```{bash}
+plink2 \
+--covar ../filtering/hail/PCAclean_cauc_rev.eigenvec \
+--covar-col-nums 3,4,5,6 \
+--logistic hide-covar \
+--out ../result/anal_chr20_rev \
+--bfile ../data/cleaned_cedars \
+--pheno /mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt \
+--pheno-col-nums 29 \
+--keep ../data/caucasian_admix.txt \
+--chr 20 \
+--from-mb 55 \
+--to-mb 56 \
+--threads 4
+
+
+plink2 \
+--covar ../filtering/hail/PCAclean_cauc_rev.eigenvec \
+--covar-col-nums 3,4,5,6 \
+--logistic hide-covar \
+--out ../result/anal_chr20 \
+--bfile ../data/cleaned_cedars \
+--pheno /mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt \
+--pheno-col-nums 29 \
+--keep ../data/caucasian.txt \
+--chr 20 \
+--from-mb 55 \
+--to-mb 56 \
+--threads 4
+```
+

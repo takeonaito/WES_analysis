@@ -1,0 +1,96 @@
+---
+title: "make_acmg_list"
+author: "Takeo Naito, MD PhD"
+date: "7/8/2019"
+output: html_document
+---
+```{r}
+getwd()
+```
+
+```{r}
+file_path = "/home/takeo/exomechip/DATA_FINAL_IBD Exome Plus_Apr2013/UPDATED FILES/data/"
+```
+
+
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+
+```
+# read necessary files (variant files and ACMG gene namelist)
+# ftp://ftp.ncbi.nlm.nih.gov/pub/clinvar/tab_delimited/
+```{r}
+
+vari <- read_tsv(paste0(file_path,"snplist/variant_summary2.txt")) 
+colnames(vari) <- make.names(colnames(vari))
+
+
+acmg <- read_tsv(paste0(file_path,"snplist/ACMGgene"),col_names = FALSE)
+```
+
+# extract variant information of ACMG genes 
+# delete duplication (basically, each snp has 2 duplications because of hg19 and hg38)
+
+```{r}
+ACMG <- vari %>% 
+  dplyr::filter(GeneSymbol %in% acmg$X1) %>% 
+  filter(Assembly == "GRCh37")
+```
+# select only pathogenic genes
+
+```{r}
+ACMG <- ACMG[grepl("Pathogenic",ACMG$ClinicalSignificance,ignore.case = TRUE),]
+```
+# make snplist of ACMG pathogenic variants
+
+```{r}
+snplist <- ACMG %>% 
+  dplyr::select(GeneSymbol,ClinicalSignificance,RS...dbSNP.,PhenotypeList,
+                Chromosome,Start,Stop,ReferenceAllele,AlternateAllele) %>% 
+  mutate(snp = paste0("rs",RS...dbSNP.)) %>% 
+  arrange(GeneSymbol) %>% 
+  dplyr::select(-RS...dbSNP.) %>% 
+  filter(ReferenceAllele != "na")
+
+
+```
+# extract variants whose snp ID is unknown.
+```{r}
+snplist1 <- snplist %>% 
+  filter(snp == "rs-1") 
+
+snplist1 %>% 
+  select(Chromosome,Start,Stop) %>% 
+  write.table(paste0("../data/ACMG/ACMGsnp_unknownrs.txt"),quote = FALSE,
+              sep = "\t",row.names = FALSE)
+```
+# extract other variants
+
+```{r}
+snplist2 <- snplist %>% 
+  filter(snp != "rs-1") 
+
+snplist3 <- snplist2 %>% 
+  distinct(snp,.keep_all = TRUE) %>% 
+  select(Chromosome,Start,Stop,GeneSymbol)
+
+write.table(snplist3,"../data/ACMG/ACMGsnprev.txt",
+                            quote = FALSE, sep = "\t",row.names = FALSE,
+            col.names = FALSE)
+```
+
+
+```{bash}
+plink2 \
+--extract range ../data/ACMG/ACMGsnprev.txt \
+--freq \
+--out ../result/ACMG/freqlist \
+--bfile ../data/cleaned_cedars \
+```
+

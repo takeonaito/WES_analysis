@@ -1,0 +1,86 @@
+---
+title: "missing clinical information of WES data"
+author: "Takeo Naito"
+date: "6/12/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### read Copy of Genetics 01_02_2019.xls file for information of All data
+
+```{r message=F, warning=F}
+library(readxl)
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+pheno <- read_xls("../data/Copy of Genetics 01_02_2019.xls",col_types = "text") 
+colnames(pheno) <- make.names(colnames(pheno))
+
+pheno <- pheno %>% 
+  distinct(Genetic.ID, .keep_all = TRUE)
+
+kable(head(pheno)) %>%
+  kable_styling() %>%
+  scroll_box(width = "1000px", height = "200px")
+
+dim(pheno)
+```
+
+### read niddk_vcf_samples_biostats.xlsx file for information of WES data
+
+```{r message=F, warning=F}
+wes <- read_xlsx("../data/niddk_vcf_samples_biostats.xlsx",
+                 col_types = c("text"))
+colnames(wes) <- make.names(colnames(wes))
+head(wes)
+dim(wes)
+
+```
+### delete subjects whose genetic ID are not available (non-Cedars subjects)
+```{r}
+wes <- wes %>% 
+  drop_na(GeneticID)
+
+head(wes)
+dim(wes)
+```
+
+### merge pheno and wes by genetic ID
+```{r}
+wes1 <- wes %>% 
+  left_join(pheno,by = c("GeneticID" = "Genetic.ID"))
+
+head(wes1)
+dim(wes1)
+```
+### 362 subjects don't have phenotype data (like gender), but have Genetic ID
+```{r}
+table(is.na(wes1$Gender))
+table(is.na(wes1$GeneticID))
+length(setdiff(wes1$GeneticID,pheno$Genetic.ID))
+
+```
+### those subjects are mostly telaviv control
+
+```{r message=FALSE, warning=FALSE}
+hen <- setdiff(wes1$GeneticID,pheno$Genetic.ID)
+
+
+
+tai <- wes1 %>% 
+  dplyr::filter(GeneticID %in% hen) 
+
+kable(tai) %>%
+  kable_styling() %>%
+  scroll_box(width = "1000px", height = "200px")
+
+
+```
+
+# the end
+

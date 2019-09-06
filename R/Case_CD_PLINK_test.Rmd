@@ -1,0 +1,158 @@
+---
+title: "Untitled"
+author: "Takeo Naito, MD PhD"
+date: "8/15/2019"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+```
+
+```{r}
+PCs <- fread("/mnt/share6/FOR_Takeo/WES/PC/admixed_based_pc.eigenvec")
+pheno <- fread("/mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt")
+
+
+dim(PCs)
+dim(pheno)
+
+
+PCs1 <- PCs %>% 
+  inner_join(pheno, by = c("IID")) %>% 
+  select(FID,IID,PC1,PC2,PC3,PC4,PC5,Gender)
+
+PCs1 %>% 
+  write_tsv("/mnt/share6/FOR_Takeo/WES/PC/admixed_based_pc_sex.eigenvec")
+
+```
+
+
+```{bash}
+plink2 \
+--covar /mnt/share6/FOR_Takeo/WES/PC/admixed_based_pc_sex.eigenvec \
+--covar-col-nums 3,4,5,6 \
+--logistic hide-covar \
+--out /mnt/share6/FOR_Takeo/WES/IBD_or_CONT/cd \
+--bfile /mnt/share6/FOR_Takeo/WES/plinkdata/cleaned_cedars_gender \
+--remove /mnt/share6/FOR_Takeo/WES/plinkdata/relate.txt \
+--pheno /mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt \
+--pheno-name CDorHC \
+--hwe 0.001 \
+--geno 0.03 \
+--adjust \
+--xchr-model 2 \
+--threads 4
+```
+
+```{bash}
+plink2 \
+--keep-if CDorHC = 2 \
+--keep ~/WES/data/admix_based_caucasian.txt \
+--freq \
+--remove /mnt/share6/FOR_Takeo/WES/plinkdata/relate.txt \
+--out /mnt/share6/FOR_Takeo/WES/IBD_or_CONT/case_cd \
+--bfile /mnt/share6/FOR_Takeo/WES/plinkdata/cleaned_cedars_gender \
+--pheno /mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt 
+```
+
+```{bash}
+plink2 \
+--keep-if CDorHC = 1 \
+--keep ~/WES/data/admix_based_caucasian.txt \
+--freq \
+--remove /mnt/share6/FOR_Takeo/WES/plinkdata/relate.txt \
+--out /mnt/share6/FOR_Takeo/WES/IBD_or_CONT/cnt_cd \
+--bfile /mnt/share6/FOR_Takeo/WES/plinkdata/cleaned_cedars_gender \
+--pheno /mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt 
+```
+
+
+```{r}
+res <- fread("/mnt/share6/FOR_Takeo/WES/IBD_or_CONT/cd.CDorHC.glm.logistic") %>% 
+  arrange(P)
+
+casefre <- fread("/mnt/share6/FOR_Takeo/WES/IBD_or_CONT/case_cd.afreq")
+colnames(casefre) <- make.names(colnames(casefre))
+
+cntfre <- fread("/mnt/share6/FOR_Takeo/WES/IBD_or_CONT/cnt_cd.afreq")
+colnames(cntfre) <- make.names(colnames(cntfre))
+
+```
+
+```{r}
+merge1 <- casefre %>% 
+  inner_join(cntfre,by = "ID") %>% 
+  select(-X.CHROM.y,-REF.y,-ALT.y)
+
+
+merge2 <- res %>% 
+  inner_join(merge1,by = "ID") %>% 
+  select(X.CHROM.x, POS, REF,ALT,OBS_CT,OR,P,ALT_FREQS.x,OBS_CT.x,
+         ALT_FREQS.y,OBS_CT.y) %>%  
+  dplyr::rename(CHR =  X.CHROM.x, freq_case = ALT_FREQS.x, freq_cnt = ALT_FREQS.y,
+         total_n = OBS_CT, case_n = OBS_CT.x, cnt_n = OBS_CT.y) %>% 
+  mutate(case_n = case_n/2, cnt_n = cnt_n/2)
+```
+
+
+```{r}
+kable(head(merge2,10)) %>%
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "200px")
+```
+
+
+```{r}
+pheno <- fread("/mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt")
+
+
+```
+
+# proportion of Gender is very skewed across CD and HC!!
+```{r}
+test <- pheno %>% 
+  filter(CDorHC != -9) %>% 
+  filter(Gender != -9)
+
+table(test$Gender,test$CDorHC)
+
+fisher.test(table(test$CDorHC,test$Gender))
+```
+# add annotation file
+
+```{r}
+anot <- fread("/mnt/share6/FOR_Takeo/WES/annovar_variant/ibdonly_anovar_anotation.txt")
+colnames(anot)
+
+anot1 <- anot %>% 
+  select(Chr,Start,Ref,Alt,CADD_raw,CADD_phred,Gene.refGene,ExonicFunc.knownGene,
+         Func.knownGene) %>% 
+  mutate(name = paste0(Chr,":",Start,":",Ref,":",Alt))
+  
+
+merge2 <- merge2 %>% 
+  mutate(name = paste0(CHR,":",POS,":",REF,":",ALT))
+
+merge3 <- merge2 %>% 
+  left_join(anot1, by = c("name")) %>% 
+  select(-Start,-Chr,-Ref,-Alt)
+```
+
+```{r}
+kable(head(merge3,20)) %>%
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "200px")
+```
+
+
+```{r}
+head(merge3,20)
+```
+
+

@@ -1,0 +1,109 @@
+---
+title: "Untitled"
+author: "Takeo Naito, MD PhD"
+date: "8/5/2019"
+output: html_document
+---
+
+
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+```
+
+```{bash}
+plink2 \
+--covar ../filtering/hail/PCAclean_cauc.eigenvec \
+--covar-col-nums 3,4,5,6 \
+--logistic hide-covar \
+--out ../result/anal \
+--bfile ../data/cleaned_cedars \
+--pheno /mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt \
+--pheno-col-nums 29 \
+--keep ../data/caucasian.txt \
+--adjust \
+--threads 4
+```
+```{bash}
+plink2 \
+--keep-if anal = 2 \
+--freq \
+--out ../result/case \
+--bfile ../data/cleaned_cedars \
+--keep ../data/caucasian.txt \
+--pheno /mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt 
+```
+
+
+```{bash}
+plink2 \
+--keep-if anal = 1 \
+--freq \
+--out ../result/cnt \
+--bfile ../data/cleaned_cedars \
+--keep ../data/caucasian.txt \
+--pheno /mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt 
+```
+
+```{r}
+res <- fread("../result/anal.anal.glm.logistic") %>% 
+  arrange(P)
+
+casefre <- fread("../result/case.afreq")
+colnames(casefre) <- make.names(colnames(casefre))
+
+cntfre <- fread("../result/cnt.afreq")
+colnames(cntfre) <- make.names(colnames(cntfre))
+
+```
+
+
+```{r}
+merge1 <- casefre %>% 
+  inner_join(cntfre,by = "ID") %>% 
+  select(-X.CHROM.y,-REF.y,-ALT.y)
+
+
+merge2 <- res %>% 
+  inner_join(merge1,by = "ID") %>% 
+  select(X.CHROM.x, POS, REF,ALT,OBS_CT,OR,P,ALT_FREQS.x,OBS_CT.x,
+         ALT_FREQS.y,OBS_CT.y) %>%  
+  dplyr::rename(CHR =  X.CHROM.x, freq_case = ALT_FREQS.x, freq_cnt = ALT_FREQS.y,
+         total_n = OBS_CT, case_n = OBS_CT.x, cnt_n = OBS_CT.y) %>% 
+  mutate(case_n = case_n/2, cnt_n = cnt_n/2)
+```
+
+
+```{r}
+kable(head(merge2,10)) %>%
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "200px")
+```
+
+
+```{r,fig.cap="manhattan",message=F, warning=F, echo=FALSE}
+knitr::include_graphics("/mnt/share6/FOR_Takeo/WES/plot/Picture1.png")
+```
+
+# make logistic results for locus zoom
+```{bash}
+plink2 \
+--covar ../filtering/hail/PCAclean_cauc.eigenvec \
+--covar-col-nums 3,4,5,6 \
+--logistic hide-covar \
+--out ../result/anal_chr20 \
+--bfile ../data/cleaned_cedars \
+--pheno /mnt/share6/FOR_Takeo/WES/SKAT/SKAT_target_rev2.txt \
+--pheno-col-nums 29 \
+--keep ../data/caucasian.txt \
+--chr 20 \
+--from-mb 55 \
+--to-mb 56 \
+--threads 4
+```
+

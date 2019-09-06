@@ -1,0 +1,134 @@
+---
+title: "For_complicated_ornot"
+author: "Takeo Naito, MD PhD"
+date: "7/22/2019"
+output: html_document
+---
+
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+library(readr)
+library(knitr)
+library(kableExtra)
+```
+
+```{bash}
+plink2 \
+--covar ../filtering/hail/PCAclean_rev.eigenvec \
+--covar-col-nums 3,4,5,6 \
+--logistic hide-covar \
+--out ../result/complicated/complicate_all \
+--bfile ../data/cleaned_cedars \
+--pheno ../data/SKAT/SKAT_target.txt \
+--pheno-col-nums 16 \
+--threads 4
+```
+
+
+```{bash}
+plink2 \
+--keep-if complicate = 2 \
+--freq \
+--out ../result/complicated/case \
+--bfile ../data/cleaned_cedars \
+--pheno ../data/SKAT/SKAT_target.txt
+
+```
+
+```{bash}
+plink2 \
+--keep-if complicate = 1 \
+--freq \
+--out ../result/complicated/cnt \
+--bfile ../data/cleaned_cedars \
+--pheno ../data/SKAT/SKAT_target.txt
+```
+
+```{r}
+res <- fread("../result/complicated/complicate_all.complicate.glm.logistic") %>% 
+  arrange(P)
+
+casefre <- fread("../result/complicated/case.afreq")
+colnames(casefre) <- make.names(colnames(casefre))
+
+cntfre <- fread("../result/complicated/cnt.afreq")
+colnames(cntfre) <- make.names(colnames(cntfre))
+
+```
+
+```{r}
+merge1 <- casefre %>% 
+  inner_join(cntfre,by = "ID") %>% 
+  select(-X.CHROM.y,-REF.y,-ALT.y)
+
+
+merge2 <- res %>% 
+  inner_join(merge1,by = "ID") %>% 
+  select(X.CHROM.x, POS, REF,ALT,OBS_CT,OR,SE,P,ALT_FREQS.x,OBS_CT.x,
+         ALT_FREQS.y,OBS_CT.y) %>%  
+  dplyr::rename(CHR =  X.CHROM.x, freq_case = ALT_FREQS.x, freq_cnt = ALT_FREQS.y,
+         total_n = OBS_CT, case_n = OBS_CT.x, cnt_n = OBS_CT.y) %>% 
+  mutate(case_n = case_n/2, cnt_n = cnt_n/2)
+```
+
+```{r}
+kable(head(merge2)) %>%
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "200px")
+```
+
+
+```{r}
+wan <- read_xlsx("/mnt/share6/FOR_Takeo/WES/VEOIBD/complicated_skat_all1.xlsx") %>%  
+  mutate(gene = as.character(SetID)) %>% 
+  arrange(P.value)
+
+NOD2 <- which(wan$SetID == "NOD2")
+target <- c(c(1:10),NOD2)
+
+kouho <- wan[target,] %>% 
+  dplyr::select(SetID) 
+```
+```{r}
+hen <- read_tsv("/mnt/share6/FOR_Takeo/WES/SKAT/SetIDtest2",col_names = FALSE)
+```
+
+```{r}
+merge3 <- merge2 %>% 
+  mutate (name = paste0(CHR,":",POS,":",REF,":",ALT))
+```
+
+```{r}
+erge4 <- merge3 %>% 
+  full_join(hen,by =c('name' = 'X2')) %>% 
+  arrange(X1)
+```
+
+```{r}
+merge5 <- merge4 %>% 
+  filter(X1 %in% kouho$SetID)
+
+merge5 <- merge5 %>%
+  left_join(wan,by = c("X1" = "gene")) %>% 
+  select(-name,-X1) %>% 
+  arrange(P.value)
+```
+
+```{r}
+kable(head(merge5)) %>%
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "200px")
+```
+
+
+
+
+```{r}
+# write_csv(merge5,"/mnt/share6/FOR_Takeo/WES/VEOIBD/complicated_gene_summary.csv")
+```
+
+
+
